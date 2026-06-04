@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/dan2756/dirnote/internal/notes"
+	"github.com/dan2756/dirnote/internal/shell"
 )
 
 const addHelp = `Usage: dirnote add [-d DIR] TEXT...
@@ -28,11 +29,13 @@ is read from standard input.
   -d DIR   act on DIR instead of the current directory
 `
 
-const showHelp = `Usage: dirnote show [-d DIR]
+const showHelp = `Usage: dirnote show [-d DIR] [--hook]
 
 Print the note for the current directory. Exits 1 if there is none.
 
   -d DIR   act on DIR instead of the current directory
+  --hook   mode for shell hooks: print to stderr, say nothing and exit 0
+           when there is no note
 `
 
 const rmHelp = `Usage: dirnote rm [-d DIR]
@@ -41,6 +44,19 @@ Delete the note for the current directory. DIR does not have to exist any
 more. Exits 1 if there was no note.
 
   -d DIR   act on DIR instead of the current directory
+`
+
+const initHelp = `Usage: dirnote init zsh|bash|fish
+
+Print a hook that runs 'dirnote show --hook' whenever the working directory
+changes. Load it from your shell's startup file:
+
+  eval "$(dirnote init zsh)"     # ~/.zshrc
+  eval "$(dirnote init bash)"    # ~/.bashrc
+  dirnote init fish | source     # ~/.config/fish/config.fish
+
+The zsh hook uses add-zsh-hook chpwd, the bash hook wraps PROMPT_COMMAND
+(keeping whatever is already there) and the fish hook watches $PWD.
 `
 
 const lsHelp = `Usage: dirnote ls
@@ -107,12 +123,26 @@ func (c *cli) noteText(pos []string) (string, error) {
 func (c *cli) show(args []string) error {
 	flags := newFlags("show")
 	dirFlag := flags.String("d", "", "")
+	hook := flags.Bool("hook", false, "")
 	if pos, err := parse(flags, args); err != nil {
 		return err
 	} else if len(pos) > 0 {
 		return errUsage{"unexpected argument " + pos[0]}
 	}
-	dir, err := targetDir(*dirFlag, false)
+	if !*hook {
+		return c.showNote(*dirFlag, c.stdout, false)
+	}
+	// Hook mode runs on every cd: stay quiet unless there is something to
+	// show, keep stdout clean for command substitutions, and never make the
+	// shell report a failure.
+	if err := c.showNote(*dirFlag, c.stderr, true); err != nil {
+		fmt.Fprintf(c.stderr, "dirnote: %v\n", err)
+	}
+	return nil
+}
+
+func (c *cli) showNote(dirFlag string, w io.Writer, hook bool) error {
+	dir, err := targetDir(dirFlag, false)
 	if err != nil {
 		return err
 	}
@@ -122,9 +152,36 @@ func (c *cli) show(args []string) error {
 	}
 	n, ok := st.Get(dir)
 	if !ok {
+		if hook {
+			return nil
+		}
 		return errNoNote{dir}
 	}
-	fmt.Fprintln(c.stdout, n.Text)
+	if hook {
+		fmt.Fprintf(w, "%s:\n", tildify(dir))
+		for _, l := range strings.Split(n.Text, "\n") {
+			fmt.Fprintln(w, "  "+l)
+		}
+		return nil
+	}
+	fmt.Fprintln(w, n.Text)
+	return nil
+}
+
+func (c *cli) initShell(args []string) error {
+	flags := newFlags("init")
+	pos, err := parse(flags, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) != 1 {
+		return errUsage{"expected one shell: " + strings.Join(shell.Shells, ", ")}
+	}
+	script, err := shell.Script(pos[0])
+	if err != nil {
+		return errUsage{err.Error()}
+	}
+	fmt.Fprint(c.stdout, script)
 	return nil
 }
 

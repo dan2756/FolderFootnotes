@@ -162,3 +162,35 @@ func TestTildify(t *testing.T) {
 		}
 	}
 }
+
+func TestShowHook(t *testing.T) {
+	dir := setup(t)
+	if r := runCLI(t, "", "show", "--hook", "-d", dir); r != (result{}) {
+		t.Fatalf("hook with no note should be silent: %+v", r)
+	}
+	runCLI(t, "", "add", "-d", dir, "needs docker")
+	r := runCLI(t, "", "show", "--hook", "-d", dir)
+	if r.code != 0 || r.stdout != "" || !strings.Contains(r.stderr, "needs docker") {
+		t.Fatalf("hook should print the note to stderr: %+v", r)
+	}
+
+	os.WriteFile(os.Getenv("DIRNOTE_FILE"), []byte("{broken"), 0o600)
+	if r := runCLI(t, "", "show", "--hook", "-d", dir); r.code != 0 || r.stderr == "" {
+		t.Fatalf("hook should report errors but exit 0: %+v", r)
+	}
+}
+
+func TestInit(t *testing.T) {
+	for _, sh := range []string{"zsh", "bash", "fish"} {
+		r := runCLI(t, "", "init", sh)
+		if r.code != 0 || !strings.Contains(r.stdout, "dirnote show --hook") {
+			t.Errorf("init %s: %+v", sh, r)
+		}
+	}
+	if r := runCLI(t, "", "init", "tcsh"); r.code != exitError {
+		t.Errorf("init tcsh: %+v", r)
+	}
+	if r := runCLI(t, "", "init"); r.code != exitError {
+		t.Errorf("init with no shell: %+v", r)
+	}
+}

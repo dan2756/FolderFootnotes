@@ -22,13 +22,19 @@ const usage = `dirnote - leave a note on a directory, see it when you cd in
 Usage:
   dirnote add [-d DIR] TEXT...    append to the note for a directory
   dirnote set [-d DIR] TEXT...    replace the note
-  dirnote show [-d DIR]           print the note (the default command)
+  dirnote show [-d DIR] [--hook]  print the note (the default command)
   dirnote rm [-d DIR]             delete the note
   dirnote ls                      list every note
+  dirnote init zsh|bash|fish      print the shell hook that shows notes on cd
 
 Commands act on the current directory unless -d is given. Notes are kept in
 $XDG_DATA_HOME/dirnote/notes.json (~/.local/share/dirnote/notes.json), or in
 $DIRNOTE_FILE if set.
+
+To see notes as you cd around, add one of these to your shell's rc file:
+  eval "$(dirnote init zsh)"     # ~/.zshrc
+  eval "$(dirnote init bash)"    # ~/.bashrc
+  dirnote init fish | source     # ~/.config/fish/config.fish
 
 Run 'dirnote COMMAND -h' for details on a command.
 `
@@ -48,6 +54,7 @@ func init() {
 		{"show", showHelp, (*cli).show},
 		{"rm", rmHelp, (*cli).rm},
 		{"ls", lsHelp, (*cli).ls},
+		{"init", initHelp, (*cli).initShell},
 	}
 }
 
