@@ -22,7 +22,7 @@ const usage = `dirnote - leave a note on a directory, see it when you cd in
 Usage:
   dirnote add [-d DIR] TEXT...    append to the note for a directory
   dirnote set [-d DIR] TEXT...    replace the note
-  dirnote show [-d DIR] [--hook]  print the note (the default command)
+  dirnote show [-d DIR] [--plain] print the note (the default command)
   dirnote rm [-d DIR]             delete the note
   dirnote ls                      list every note
   dirnote init zsh|bash|fish      print the shell hook that shows notes on cd
@@ -164,26 +164,57 @@ func newFlags(name string) *flag.FlagSet {
 
 // parse parses flags wherever they appear among args (the flag package stops
 // at the first positional argument) and returns the positional arguments.
-// "--" ends flag parsing.
+// "--" ends flag parsing, and a dash followed by whitespace ("- seed the db")
+// is note text, not a flag.
 func parse(fs *flag.FlagSet, args []string) ([]string, error) {
-	var pos []string
-	for {
-		if err := fs.Parse(args); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				return nil, err
-			}
-			return nil, errUsage{err.Error()}
+	var pos, flagArgs []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			pos = append(pos, args[i+1:]...)
+			break
 		}
-		rest := fs.Args()
-		if len(rest) == 0 {
-			return pos, nil
+		name, hasValue, ok := flagName(a)
+		if !ok {
+			pos = append(pos, a)
+			continue
 		}
-		if n := len(args) - len(rest); n > 0 && args[n-1] == "--" {
-			return append(pos, rest...), nil
+		flagArgs = append(flagArgs, a)
+		if !hasValue && takesValue(fs, name) && i+1 < len(args) {
+			i++
+			flagArgs = append(flagArgs, args[i])
 		}
-		pos = append(pos, rest[0])
-		args = rest[1:]
 	}
+	if err := fs.Parse(flagArgs); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil, err
+		}
+		return nil, errUsage{err.Error()}
+	}
+	return append(pos, fs.Args()...), nil
+}
+
+// flagName splits "-name" or "--name=value" into the name and whether a
+// value is attached. ok is false for anything that is not a flag.
+func flagName(a string) (name string, hasValue, ok bool) {
+	if len(a) < 2 || a[0] != '-' {
+		return "", false, false
+	}
+	name = strings.TrimPrefix(a[1:], "-")
+	name, _, hasValue = strings.Cut(name, "=")
+	if name == "" || strings.ContainsAny(name, " \t\n") {
+		return "", false, false
+	}
+	return name, hasValue, true
+}
+
+func takesValue(fs *flag.FlagSet, name string) bool {
+	f := fs.Lookup(name)
+	if f == nil {
+		return false
+	}
+	b, ok := f.Value.(interface{ IsBoolFlag() bool })
+	return !ok || !b.IsBoolFlag()
 }
 
 // tildify shortens paths under the home directory to ~/...

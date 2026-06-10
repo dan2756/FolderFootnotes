@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/dan2756/dirnote/internal/notes"
+	"github.com/dan2756/dirnote/internal/render"
 	"github.com/dan2756/dirnote/internal/shell"
 )
 
@@ -29,13 +30,17 @@ is read from standard input.
   -d DIR   act on DIR instead of the current directory
 `
 
-const showHelp = `Usage: dirnote show [-d DIR] [--hook]
+const showHelp = `Usage: dirnote show [-d DIR] [--hook] [--plain]
 
-Print the note for the current directory. Exits 1 if there is none.
+Print the note for the current directory in a box sized to the terminal.
+Exits 1 if there is none.
 
-  -d DIR   act on DIR instead of the current directory
-  --hook   mode for shell hooks: print to stderr, say nothing and exit 0
-           when there is no note
+  -d DIR    act on DIR instead of the current directory
+  --hook    mode for shell hooks: print to stderr, say nothing and exit 0
+            when there is no note
+  --plain   no box and no colors, just the directory and the note
+
+Colors are left out when the output is not a terminal or NO_COLOR is set.
 `
 
 const rmHelp = `Usage: dirnote rm [-d DIR]
@@ -124,24 +129,25 @@ func (c *cli) show(args []string) error {
 	flags := newFlags("show")
 	dirFlag := flags.String("d", "", "")
 	hook := flags.Bool("hook", false, "")
+	plain := flags.Bool("plain", false, "")
 	if pos, err := parse(flags, args); err != nil {
 		return err
 	} else if len(pos) > 0 {
 		return errUsage{"unexpected argument " + pos[0]}
 	}
 	if !*hook {
-		return c.showNote(*dirFlag, c.stdout, false)
+		return c.showNote(*dirFlag, c.stdout, false, *plain)
 	}
 	// Hook mode runs on every cd: stay quiet unless there is something to
 	// show, keep stdout clean for command substitutions, and never make the
 	// shell report a failure.
-	if err := c.showNote(*dirFlag, c.stderr, true); err != nil {
+	if err := c.showNote(*dirFlag, c.stderr, true, *plain); err != nil {
 		fmt.Fprintf(c.stderr, "dirnote: %v\n", err)
 	}
 	return nil
 }
 
-func (c *cli) showNote(dirFlag string, w io.Writer, hook bool) error {
+func (c *cli) showNote(dirFlag string, w io.Writer, hook, plain bool) error {
 	dir, err := targetDir(dirFlag, false)
 	if err != nil {
 		return err
@@ -157,15 +163,16 @@ func (c *cli) showNote(dirFlag string, w io.Writer, hook bool) error {
 		}
 		return errNoNote{dir}
 	}
-	if hook {
-		fmt.Fprintf(w, "%s:\n", tildify(dir))
-		for _, l := range strings.Split(n.Text, "\n") {
-			fmt.Fprintln(w, "  "+l)
-		}
-		return nil
-	}
-	fmt.Fprintln(w, n.Text)
+	printSections(w, []render.Section{{Label: tildify(dir), Text: n.Text}}, plain)
 	return nil
+}
+
+func printSections(w io.Writer, secs []render.Section, plain bool) {
+	if plain {
+		fmt.Fprint(w, render.Plain(secs))
+		return
+	}
+	fmt.Fprint(w, render.Box(secs, render.Options{Width: termWidth(w), Color: useColor(w)}))
 }
 
 func (c *cli) initShell(args []string) error {
@@ -279,13 +286,4 @@ func targetDir(flagVal string, mustExist bool) (string, error) {
 func dirExists(dir string) bool {
 	_, err := os.Stat(dir)
 	return !errors.Is(err, fs.ErrNotExist)
-}
-
-func isTerminal(r io.Reader) bool {
-	f, ok := r.(*os.File)
-	if !ok {
-		return false
-	}
-	fi, err := f.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }

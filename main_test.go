@@ -39,6 +39,25 @@ func runCLI(t *testing.T, stdin string, args ...string) result {
 	return result{code, out.String(), errb.String()}
 }
 
+// noteOf returns the note text for dir as printed by show --plain, or "" if
+// there is none.
+func noteOf(t *testing.T, dir string) string {
+	t.Helper()
+	r := runCLI(t, "", "show", "--plain", "-d", dir)
+	if r.code != 0 {
+		return ""
+	}
+	header, body, _ := strings.Cut(r.stdout, "\n")
+	if header != tildify(dir)+":" {
+		t.Fatalf("unexpected header %q", header)
+	}
+	var ls []string
+	for _, l := range strings.Split(strings.TrimSuffix(body, "\n"), "\n") {
+		ls = append(ls, strings.TrimPrefix(l, "  "))
+	}
+	return strings.Join(ls, "\n")
+}
+
 func TestAddShowRm(t *testing.T) {
 	dir := setup(t)
 
@@ -52,15 +71,14 @@ func TestAddShowRm(t *testing.T) {
 	if r := runCLI(t, "", "add", "needs docker", "-d", dir); r.code != 0 {
 		t.Fatalf("add: %+v", r)
 	}
-	r := runCLI(t, "", "show", "-d", dir)
-	if r.code != 0 || r.stdout != "run make dev first\nneeds docker\n" {
-		t.Fatalf("show: %+v", r)
+	if got := noteOf(t, dir); got != "run make dev first\nneeds docker" {
+		t.Fatalf("note = %q", got)
 	}
 
 	if r := runCLI(t, "", "set", "-d", dir, "just one line"); r.code != 0 {
 		t.Fatalf("set: %+v", r)
 	}
-	if r := runCLI(t, "", "-d", dir); r.stdout != "just one line\n" {
+	if r := runCLI(t, "", "-d", dir); !strings.Contains(r.stdout, "│ just one line ") {
 		t.Fatalf("default command should be show: %+v", r)
 	}
 
@@ -77,8 +95,8 @@ func TestAddFromStdin(t *testing.T) {
 	if r := runCLI(t, "line one\nline two\n\n", "add", "-d", dir); r.code != 0 {
 		t.Fatalf("add: %+v", r)
 	}
-	if r := runCLI(t, "", "show", "-d", dir); r.stdout != "line one\nline two\n" {
-		t.Fatalf("show: %q", r.stdout)
+	if got := noteOf(t, dir); got != "line one\nline two" {
+		t.Fatalf("note = %q", got)
 	}
 	if r := runCLI(t, "  \n", "add", "-d", dir); r.code != exitError {
 		t.Fatalf("empty add should fail: %+v", r)
@@ -88,8 +106,17 @@ func TestAddFromStdin(t *testing.T) {
 func TestDashDash(t *testing.T) {
 	dir := setup(t)
 	runCLI(t, "", "set", "-d", dir, "--", "-v", "is", "verbose")
-	if r := runCLI(t, "", "show", "-d", dir); r.stdout != "-v is verbose\n" {
-		t.Fatalf("show: %+v", r)
+	if got := noteOf(t, dir); got != "-v is verbose" {
+		t.Fatalf("note = %q", got)
+	}
+}
+
+func TestDashedText(t *testing.T) {
+	dir := setup(t)
+	runCLI(t, "", "add", "-d", dir, "- seed the db first")
+	runCLI(t, "", "add", "- then run make dev", "-d", dir)
+	if got := noteOf(t, dir); got != "- seed the db first\n- then run make dev" {
+		t.Fatalf("note = %q", got)
 	}
 }
 
@@ -100,8 +127,8 @@ func TestSymlinkedDirSharesNote(t *testing.T) {
 		t.Fatal(err)
 	}
 	runCLI(t, "", "add", "-d", link, "via the link")
-	if r := runCLI(t, "", "show", "-d", dir); r.stdout != "via the link\n" {
-		t.Fatalf("show: %+v", r)
+	if got := noteOf(t, dir); got != "via the link" {
+		t.Fatalf("note = %q", got)
 	}
 }
 
@@ -170,7 +197,7 @@ func TestShowHook(t *testing.T) {
 	}
 	runCLI(t, "", "add", "-d", dir, "needs docker")
 	r := runCLI(t, "", "show", "--hook", "-d", dir)
-	if r.code != 0 || r.stdout != "" || !strings.Contains(r.stderr, "needs docker") {
+	if r.code != 0 || r.stdout != "" || !strings.Contains(r.stderr, "│ needs docker ") {
 		t.Fatalf("hook should print the note to stderr: %+v", r)
 	}
 

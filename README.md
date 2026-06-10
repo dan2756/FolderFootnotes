@@ -18,13 +18,20 @@ cd ~/src/api
 dirnote add "run make dev first, needs docker"
 dirnote add staging creds are in 1password   # appends a line; quotes optional
 dirnote show
-# run make dev first, needs docker
-# staging creds are in 1password
+# ╭─ ~/src/api ──────────────────────╮
+# │ run make dev first, needs docker │
+# │ staging creds are in 1password   │
+# ╰──────────────────────────────────╯
 
 dirnote set -d ~/src/web "pnpm, not npm"     # replace the note for another dir
 dirnote ls                                   # every note, with its directory
 dirnote rm                                   # delete the note for this dir
 ```
+
+Notes are drawn in a box that wraps to the terminal width; list items keep a
+hanging indent when they wrap. The directory label is dimmed on terminals that
+support it. Use `--plain` for no box and no color, and set `NO_COLOR` to keep
+the box but drop the escapes.
 
 Notes live in `$XDG_DATA_HOME/dirnote/notes.json`
 (`~/.local/share/dirnote/notes.json` by default). Set `DIRNOTE_FILE` to use
