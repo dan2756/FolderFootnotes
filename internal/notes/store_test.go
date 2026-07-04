@@ -127,3 +127,17 @@ func TestDefaultPath(t *testing.T) {
 		t.Errorf("DIRNOTE_FILE = %q", p)
 	}
 }
+
+func TestPrune(t *testing.T) {
+	s := &Store{Notes: map[string]*Note{}}
+	for _, d := range []string{"/keep", "/gone/b", "/gone/a"} {
+		s.Set(d, "x", time.Now())
+	}
+	gone := s.Prune(func(dir string) bool { return dir == "/keep" })
+	if !reflect.DeepEqual(gone, []string{"/gone/a", "/gone/b"}) {
+		t.Fatalf("Prune returned %v", gone)
+	}
+	if !reflect.DeepEqual(s.Dirs(), []string{"/keep"}) {
+		t.Fatalf("left %v", s.Dirs())
+	}
+}

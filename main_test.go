@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -219,5 +220,102 @@ func TestInit(t *testing.T) {
 	}
 	if r := runCLI(t, "", "init"); r.code != exitError {
 		t.Errorf("init with no shell: %+v", r)
+	}
+}
+
+// fakeEditor makes $VISUAL a script that runs body with the file in $1.
+func fakeEditor(t *testing.T, body string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "editor")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VISUAL", path)
+}
+
+func TestEdit(t *testing.T) {
+	dir := setup(t)
+	runCLI(t, "", "add", "-d", dir, "first")
+
+	fakeEditor(t, `echo second >> "$1"`)
+	if r := runCLI(t, "", "edit", "-d", dir); r.code != 0 {
+		t.Fatalf("edit: %+v", r)
+	}
+	if got := noteOf(t, dir); got != "first\nsecond" {
+		t.Fatalf("note = %q", got)
+	}
+
+	fakeEditor(t, `true`)
+	if r := runCLI(t, "", "edit", "-d", dir); r.code != 0 || r.stdout != "no changes\n" {
+		t.Fatalf("unchanged edit: %+v", r)
+	}
+
+	fakeEditor(t, `: > "$1"`)
+	runCLI(t, "", "edit", "-d", dir)
+	if r := runCLI(t, "", "show", "-d", dir); r.code != exitNoNote {
+		t.Fatalf("emptied note should be deleted: %+v", r)
+	}
+
+	fakeEditor(t, `exit 3`)
+	if r := runCLI(t, "", "edit", "-d", dir); r.code != exitError {
+		t.Fatalf("failing editor: %+v", r)
+	}
+}
+
+func TestPrune(t *testing.T) {
+	dir := setup(t)
+	gone := filepath.Join(dir, "gone")
+	os.Mkdir(gone, 0o755)
+	runCLI(t, "", "add", "-d", dir, "kept")
+	runCLI(t, "", "add", "-d", gone, "stale")
+	os.Remove(gone)
+
+	r := runCLI(t, "", "prune", "--dry-run")
+	if r.stdout != "would delete note for "+tildify(gone)+"\n" {
+		t.Fatalf("dry run: %+v", r)
+	}
+	if r := runCLI(t, "", "show", "-d", gone); r.code != 0 {
+		t.Fatalf("dry run should keep the note: %+v", r)
+	}
+	if r := runCLI(t, "", "prune"); r.stdout != "deleted note for "+tildify(gone)+"\n" {
+		t.Fatalf("prune: %+v", r)
+	}
+	if r := runCLI(t, "", "show", "-d", gone); r.code != exitNoNote {
+		t.Fatalf("pruned note still there: %+v", r)
+	}
+	if r := runCLI(t, "", "prune"); r.code != 0 || r.stdout != "" {
+		t.Fatalf("second prune: %+v", r)
+	}
+}
+
+func TestJSON(t *testing.T) {
+	dir := setup(t)
+	gone := filepath.Join(dir, "gone")
+	os.Mkdir(gone, 0o755)
+	runCLI(t, "", "add", "-d", dir, "hello")
+	runCLI(t, "", "add", "-d", gone, "bye")
+	os.Remove(gone)
+
+	r := runCLI(t, "", "show", "--json", "-d", dir)
+	var shown []noteJSON
+	if err := json.Unmarshal([]byte(r.stdout), &shown); err != nil || r.code != 0 {
+		t.Fatalf("show --json: %v %+v", err, r)
+	}
+	if len(shown) != 1 || shown[0].Dir != dir || shown[0].Text != "hello" || shown[0].Source != "store" || shown[0].Updated.IsZero() {
+		t.Fatalf("show --json = %+v", shown)
+	}
+
+	r = runCLI(t, "", "show", "--json", "-d", filepath.Join(dir, "nothing"))
+	if r.code != exitNoNote || strings.TrimSpace(r.stdout) != "[]" {
+		t.Fatalf("show --json without note: %+v", r)
+	}
+
+	r = runCLI(t, "", "ls", "--json")
+	var listed []lsJSON
+	if err := json.Unmarshal([]byte(r.stdout), &listed); err != nil {
+		t.Fatalf("ls --json: %v %+v", err, r)
+	}
+	if len(listed) != 2 || listed[0].Dir != dir || listed[0].Missing || listed[1].Dir != gone || !listed[1].Missing {
+		t.Fatalf("ls --json = %+v", listed)
 	}
 }

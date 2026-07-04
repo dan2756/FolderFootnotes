@@ -22,9 +22,11 @@ const usage = `dirnote - leave a note on a directory, see it when you cd in
 Usage:
   dirnote add [-d DIR] TEXT...    append to the note for a directory
   dirnote set [-d DIR] TEXT...    replace the note
-  dirnote show [-d DIR] [--plain] print the note (the default command)
+  dirnote edit [-d DIR]           edit the note in $VISUAL / $EDITOR
+  dirnote show [-d DIR]           print the note (the default command)
   dirnote rm [-d DIR]             delete the note
-  dirnote ls                      list every note
+  dirnote ls [--json]             list every note
+  dirnote prune [-n]              delete notes for directories that are gone
   dirnote init zsh|bash|fish      print the shell hook that shows notes on cd
 
 Commands act on the current directory unless -d is given. Notes are kept in
@@ -51,9 +53,11 @@ func init() {
 	commands = []command{
 		{"add", addHelp, (*cli).add},
 		{"set", setHelp, (*cli).set},
+		{"edit", editHelp, (*cli).edit},
 		{"show", showHelp, (*cli).show},
 		{"rm", rmHelp, (*cli).rm},
 		{"ls", lsHelp, (*cli).ls},
+		{"prune", pruneHelp, (*cli).prune},
 		{"init", initHelp, (*cli).initShell},
 	}
 }
@@ -192,6 +196,18 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 		return nil, errUsage{err.Error()}
 	}
 	return append(pos, fs.Args()...), nil
+}
+
+// noArgs parses flags for a command that takes no positional arguments.
+func noArgs(fs *flag.FlagSet, args []string) error {
+	pos, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) > 0 {
+		return errUsage{"unexpected argument " + pos[0]}
+	}
+	return nil
 }
 
 // flagName splits "-name" or "--name=value" into the name and whether a

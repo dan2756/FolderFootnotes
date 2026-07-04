@@ -6,11 +6,10 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/dan2756/dirnote/internal/notes"
-	"github.com/dan2756/dirnote/internal/render"
-	"github.com/dan2756/dirnote/internal/shell"
 )
 
 const addHelp = `Usage: dirnote add [-d DIR] TEXT...
@@ -30,17 +29,12 @@ is read from standard input.
   -d DIR   act on DIR instead of the current directory
 `
 
-const showHelp = `Usage: dirnote show [-d DIR] [--hook] [--plain]
+const editHelp = `Usage: dirnote edit [-d DIR]
 
-Print the note for the current directory in a box sized to the terminal.
-Exits 1 if there is none.
+Open the note for the current directory in $VISUAL, or $EDITOR, or vi.
+Saving an empty file deletes the note.
 
-  -d DIR    act on DIR instead of the current directory
-  --hook    mode for shell hooks: print to stderr, say nothing and exit 0
-            when there is no note
-  --plain   no box and no colors, just the directory and the note
-
-Colors are left out when the output is not a terminal or NO_COLOR is set.
+  -d DIR   act on DIR instead of the current directory
 `
 
 const rmHelp = `Usage: dirnote rm [-d DIR]
@@ -49,25 +43,6 @@ Delete the note for the current directory. DIR does not have to exist any
 more. Exits 1 if there was no note.
 
   -d DIR   act on DIR instead of the current directory
-`
-
-const initHelp = `Usage: dirnote init zsh|bash|fish
-
-Print a hook that runs 'dirnote show --hook' whenever the working directory
-changes. Load it from your shell's startup file:
-
-  eval "$(dirnote init zsh)"     # ~/.zshrc
-  eval "$(dirnote init bash)"    # ~/.bashrc
-  dirnote init fish | source     # ~/.config/fish/config.fish
-
-The zsh hook uses add-zsh-hook chpwd, the bash hook wraps PROMPT_COMMAND
-(keeping whatever is already there) and the fish hook watches $PWD.
-`
-
-const lsHelp = `Usage: dirnote ls
-
-List every note in the store with its directory. Directories that no longer
-exist are flagged as missing.
 `
 
 func (c *cli) add(args []string) error { return c.write("add", args, false) }
@@ -125,30 +100,13 @@ func (c *cli) noteText(pos []string) (string, error) {
 	return text, nil
 }
 
-func (c *cli) show(args []string) error {
-	flags := newFlags("show")
+func (c *cli) edit(args []string) error {
+	flags := newFlags("edit")
 	dirFlag := flags.String("d", "", "")
-	hook := flags.Bool("hook", false, "")
-	plain := flags.Bool("plain", false, "")
-	if pos, err := parse(flags, args); err != nil {
+	if err := noArgs(flags, args); err != nil {
 		return err
-	} else if len(pos) > 0 {
-		return errUsage{"unexpected argument " + pos[0]}
 	}
-	if !*hook {
-		return c.showNote(*dirFlag, c.stdout, false, *plain)
-	}
-	// Hook mode runs on every cd: stay quiet unless there is something to
-	// show, keep stdout clean for command substitutions, and never make the
-	// shell report a failure.
-	if err := c.showNote(*dirFlag, c.stderr, true, *plain); err != nil {
-		fmt.Fprintf(c.stderr, "dirnote: %v\n", err)
-	}
-	return nil
-}
-
-func (c *cli) showNote(dirFlag string, w io.Writer, hook, plain bool) error {
-	dir, err := targetDir(dirFlag, false)
+	dir, err := targetDir(*dirFlag, true)
 	if err != nil {
 		return err
 	}
@@ -156,49 +114,82 @@ func (c *cli) showNote(dirFlag string, w io.Writer, hook, plain bool) error {
 	if err != nil {
 		return err
 	}
-	n, ok := st.Get(dir)
-	if !ok {
-		if hook {
-			return nil
-		}
-		return errNoNote{dir}
+	var old string
+	if n, ok := st.Get(dir); ok {
+		old = n.Text
 	}
-	printSections(w, []render.Section{{Label: tildify(dir), Text: n.Text}}, plain)
-	return nil
-}
-
-func printSections(w io.Writer, secs []render.Section, plain bool) {
-	if plain {
-		fmt.Fprint(w, render.Plain(secs))
-		return
-	}
-	fmt.Fprint(w, render.Box(secs, render.Options{Width: termWidth(w), Color: useColor(w)}))
-}
-
-func (c *cli) initShell(args []string) error {
-	flags := newFlags("init")
-	pos, err := parse(flags, args)
+	text, err := c.runEditor(old)
 	if err != nil {
 		return err
 	}
-	if len(pos) != 1 {
-		return errUsage{"expected one shell: " + strings.Join(shell.Shells, ", ")}
+
+	switch {
+	case text == old:
+		fmt.Fprintln(c.stdout, "no changes")
+		return nil
+	case text == "":
+		st.Remove(dir)
+	default:
+		st.Set(dir, text, c.now())
 	}
-	script, err := shell.Script(pos[0])
-	if err != nil {
-		return errUsage{err.Error()}
+	if err := st.Save(); err != nil {
+		return err
 	}
-	fmt.Fprint(c.stdout, script)
+	if text == "" {
+		fmt.Fprintf(c.stdout, "removed note for %s\n", tildify(dir))
+	} else {
+		fmt.Fprintf(c.stdout, "saved note for %s\n", tildify(dir))
+	}
 	return nil
+}
+
+// runEditor opens text in the user's editor and returns what they saved,
+// trimmed.
+func (c *cli) runEditor(text string) (string, error) {
+	f, err := os.CreateTemp("", "dirnote-*.txt")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(f.Name())
+	if text != "" {
+		text += "\n"
+	}
+	if _, err := f.WriteString(text); err != nil {
+		f.Close()
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+
+	editor := editorCommand()
+	// Through sh so that EDITOR="code --wait" and friends work.
+	cmd := exec.Command("sh", "-c", editor+` "$1"`, "sh", f.Name())
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = c.stdin, c.stdout, c.stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("editor %q: %w", editor, err)
+	}
+	b, err := os.ReadFile(f.Name())
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+func editorCommand() string {
+	for _, v := range []string{"VISUAL", "EDITOR"} {
+		if e := strings.TrimSpace(os.Getenv(v)); e != "" {
+			return e
+		}
+	}
+	return "vi"
 }
 
 func (c *cli) rm(args []string) error {
 	flags := newFlags("rm")
 	dirFlag := flags.String("d", "", "")
-	if pos, err := parse(flags, args); err != nil {
+	if err := noArgs(flags, args); err != nil {
 		return err
-	} else if len(pos) > 0 {
-		return errUsage{"unexpected argument " + pos[0]}
 	}
 	dir, err := targetDir(*dirFlag, false)
 	if err != nil {
@@ -215,34 +206,6 @@ func (c *cli) rm(args []string) error {
 		return err
 	}
 	fmt.Fprintf(c.stdout, "removed note for %s\n", tildify(dir))
-	return nil
-}
-
-func (c *cli) ls(args []string) error {
-	flags := newFlags("ls")
-	if pos, err := parse(flags, args); err != nil {
-		return err
-	} else if len(pos) > 0 {
-		return errUsage{"unexpected argument " + pos[0]}
-	}
-	st, err := loadStore()
-	if err != nil {
-		return err
-	}
-	if len(st.Notes) == 0 {
-		fmt.Fprintln(c.stderr, "no notes yet; add one with 'dirnote add TEXT'")
-		return nil
-	}
-	for _, dir := range st.Dirs() {
-		line := tildify(dir)
-		if !dirExists(dir) {
-			line += " (missing)"
-		}
-		fmt.Fprintln(c.stdout, line)
-		for _, l := range strings.Split(st.Notes[dir].Text, "\n") {
-			fmt.Fprintln(c.stdout, "  "+l)
-		}
-	}
 	return nil
 }
 
@@ -282,7 +245,8 @@ func targetDir(flagVal string, mustExist bool) (string, error) {
 }
 
 // dirExists reports whether dir is still there. Errors other than "not
-// found" (permissions, say) count as existing.
+// found" (permissions, an unreadable mount) count as existing so prune
+// never drops a note it isn't sure about.
 func dirExists(dir string) bool {
 	_, err := os.Stat(dir)
 	return !errors.Is(err, fs.ErrNotExist)

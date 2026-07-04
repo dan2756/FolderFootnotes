@@ -24,9 +24,48 @@ dirnote show
 # ╰──────────────────────────────────╯
 
 dirnote set -d ~/src/web "pnpm, not npm"     # replace the note for another dir
+dirnote edit                                 # open it in $VISUAL / $EDITOR
 dirnote ls                                   # every note, with its directory
 dirnote rm                                   # delete the note for this dir
+dirnote prune -n                             # which notes point at deleted dirs?
+dirnote prune                                # ...and drop them
 ```
+
+`ls` marks directories that no longer exist with `(missing)`. `prune` only
+drops a note when its directory is definitely gone; a permission error or an
+unreachable mount counts as "still there".
+
+`edit` runs `$VISUAL`, then `$EDITOR`, then `vi`, through `sh -c`, so values
+like `code --wait` work. Saving an empty file deletes the note.
+
+### JSON
+
+`show --json` and `ls --json` print arrays, for scripts and status lines:
+
+```sh
+$ dirnote show --json
+[
+  {
+    "dir": "/home/dj/src/api",
+    "source": "store",
+    "text": "run make dev first, needs docker",
+    "created": "2026-06-03T19:55:12Z",
+    "updated": "2026-06-03T19:55:12Z"
+  }
+]
+$ dirnote ls --json | jq -r '.[] | select(.missing) | .dir'
+/home/dj/src/old-prototype
+```
+
+### Exit codes
+
+| code | meaning |
+| ---- | ------- |
+| 0 | success |
+| 1 | `show` or `rm` found no note |
+| 2 | bad usage, or an error such as an unreadable store |
+
+`show --hook` always exits 0.
 
 Notes are drawn in a box that wraps to the terminal width; list items keep a
 hanging indent when they wrap. The directory label is dimmed on terminals that

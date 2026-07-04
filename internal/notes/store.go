@@ -136,3 +136,16 @@ func (s *Store) Dirs() []string {
 	sort.Strings(dirs)
 	return dirs
 }
+
+// Prune removes the notes for which keep returns false and returns their
+// directories, sorted.
+func (s *Store) Prune(keep func(dir string) bool) []string {
+	var gone []string
+	for _, dir := range s.Dirs() {
+		if !keep(dir) {
+			delete(s.Notes, dir)
+			gone = append(gone, dir)
+		}
+	}
+	return gone
+}
