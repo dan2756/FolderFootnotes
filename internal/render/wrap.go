@@ -18,10 +18,10 @@ func Wrap(text string, width int) []string {
 	return out
 }
 
-// lines splits text into lines with tabs expanded and trailing blanks
-// trimmed.
+// lines splits sanitized text into lines with tabs expanded and trailing
+// blanks trimmed.
 func lines(text string) []string {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = Sanitize(strings.ReplaceAll(text, "\r\n", "\n"))
 	text = strings.ReplaceAll(text, "\t", "    ")
 	ls := strings.Split(strings.Trim(text, "\n"), "\n")
 	for i, l := range ls {

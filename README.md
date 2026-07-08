@@ -38,9 +38,37 @@ unreachable mount counts as "still there".
 `edit` runs `$VISUAL`, then `$EDITOR`, then `vi`, through `sh -c`, so values
 like `code --wait` work. Saving an empty file deletes the note.
 
+### Notes that ship with a repo
+
+A directory can also carry its own note in a `.dirnote` file, so a project can
+tell everyone who clones it how to get started. `--local` makes `add`, `set`,
+`edit` and `rm` work on that file instead of the central store:
+
+```sh
+dirnote add --local "Node 20 only. Run make seed before the tests."
+git add .dirnote
+```
+
+When both exist, `show` (and the hook) prints both, the central note first:
+
+```
+╭─ ~/src/api ──────────────────────────────────────╮
+│ my staging creds are in 1password                │
+├─ ~/src/api/.dirnote ─────────────────────────────┤
+│ Node 20 only. Run make seed before the tests.    │
+╰──────────────────────────────────────────────────╯
+```
+
+A `.dirnote` file is written by whoever wrote the repo, so dirnote treats it
+as untrusted text: escape sequences and control characters are stripped before
+anything is printed, only regular files are read (no FIFOs or devices), and
+files over 64 KiB are refused.
+
 ### JSON
 
-`show --json` and `ls --json` print arrays, for scripts and status lines:
+`show --json` and `ls --json` print arrays, for scripts and status lines.
+`source` is `store` or `local` (a `.dirnote` file); `created` and `updated`
+are only known for notes in the store.
 
 ```sh
 $ dirnote show --json
@@ -48,6 +76,7 @@ $ dirnote show --json
   {
     "dir": "/home/dj/src/api",
     "source": "store",
+    "file": "/home/dj/.local/share/dirnote/notes.json",
     "text": "run make dev first, needs docker",
     "created": "2026-06-03T19:55:12Z",
     "updated": "2026-06-03T19:55:12Z"

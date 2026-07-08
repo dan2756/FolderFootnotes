@@ -4,12 +4,15 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/dan2756/dirnote/internal/render"
 )
 
 const lsHelp = `Usage: dirnote ls [--json]
 
-List every note in the store with its directory. Directories that no longer
-exist are flagged as missing.
+List every note in the central store with its directory. Directories that
+no longer exist are flagged as missing. (.dirnote files are not listed: they
+live wherever their directories are.)
 
   --json   print a JSON array instead
 `
@@ -59,7 +62,7 @@ func (c *cli) ls(args []string) error {
 			line += " (missing)"
 		}
 		fmt.Fprintln(c.stdout, line)
-		for _, l := range strings.Split(st.Notes[dir].Text, "\n") {
+		for _, l := range strings.Split(render.Sanitize(st.Notes[dir].Text), "\n") {
 			fmt.Fprintln(c.stdout, "  "+l)
 		}
 	}

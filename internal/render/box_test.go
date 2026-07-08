@@ -138,3 +138,38 @@ func TestWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitize(t *testing.T) {
+	tests := map[string]string{
+		"plain text\n\twith tab":                 "plain text\n\twith tab",
+		"\x1b[31mred\x1b[0m":                     "red",
+		"title\x1b]0;pwned\x07 here":             "title here",
+		"osc8 \x1b]8;;http://x\x1b\\link":        "osc8 link",
+		"bell\a and backspace\b":                 "bell and backspace",
+		"carriage\rreturn":                       "carriagereturn",
+		"c1 \u009b31m csi":                       "c1 31m csi",
+		"bidi ‮evil‬":                            "bidi evil",
+		"emoji zwj 👩‍💻 stays":                    "emoji zwj 👩‍💻 stays",
+		"bad utf8 \xff":                          "bad utf8 �",
+		"trailing esc \x1b":                      "trailing esc ",
+		"unterminated \x1b[12;34":                "unterminated ",
+		"keypad \x1b= mode":                      "keypad  mode",
+		"dcs \x1bPq#0;2;0;0;0\x1b\\ after sixel": "dcs  after sixel",
+	}
+	for in, want := range tests {
+		if got := Sanitize(in); got != want {
+			t.Errorf("Sanitize(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestBoxSanitizes(t *testing.T) {
+	got := Box([]Section{{Label: "~/evil\x1b[2J\nrepo", Text: "\x1b]0;title\x07hi\x1b[5m"}}, Options{Width: 80})
+	want := "" +
+		"╭─ ~/evil repo ─╮\n" +
+		"│ hi            │\n" +
+		"╰───────────────╯\n"
+	if got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}

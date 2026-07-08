@@ -41,7 +41,7 @@ func Box(sections []Section, opt Options) string {
 	labels := make([]string, len(sections))
 	bodies := make([][]string, len(sections))
 	for i, s := range sections {
-		labels[i] = truncateLeft(s.Label, maxInner-2)
+		labels[i] = truncateLeft(cleanLabel(s.Label), maxInner-2)
 		if labels[i] != "" {
 			inner = max(inner, Width(labels[i])+2)
 		}
@@ -86,14 +86,24 @@ func rule(left, right, label string, inner int, color bool) string {
 func Plain(sections []Section) string {
 	var b strings.Builder
 	for _, s := range sections {
-		if s.Label != "" {
-			b.WriteString(s.Label + ":\n")
+		if l := cleanLabel(s.Label); l != "" {
+			b.WriteString(l + ":\n")
 		}
 		for _, l := range lines(s.Text) {
 			b.WriteString(strings.TrimRight("  "+l, " ") + "\n")
 		}
 	}
 	return b.String()
+}
+
+// cleanLabel makes a label safe to print on one line.
+func cleanLabel(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return ' '
+		}
+		return r
+	}, Sanitize(s))
 }
 
 // truncateLeft shortens s to at most n columns by cutting from the left,

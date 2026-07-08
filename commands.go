@@ -12,37 +12,41 @@ import (
 	"github.com/dan2756/dirnote/internal/notes"
 )
 
-const addHelp = `Usage: dirnote add [-d DIR] TEXT...
+const addHelp = `Usage: dirnote add [-d DIR] [--local] TEXT...
 
 Append TEXT to the note for the current directory, on a new line. The words
 are joined with spaces, so quoting is optional. With no TEXT the note is read
 from standard input.
 
-  -d DIR   act on DIR instead of the current directory
+  -d DIR    act on DIR instead of the current directory
+  --local   write to DIR/.dirnote instead of the central store
 `
 
-const setHelp = `Usage: dirnote set [-d DIR] TEXT...
+const setHelp = `Usage: dirnote set [-d DIR] [--local] TEXT...
 
 Replace the note for the current directory with TEXT. With no TEXT the note
 is read from standard input.
 
-  -d DIR   act on DIR instead of the current directory
+  -d DIR    act on DIR instead of the current directory
+  --local   write to DIR/.dirnote instead of the central store
 `
 
-const editHelp = `Usage: dirnote edit [-d DIR]
+const editHelp = `Usage: dirnote edit [-d DIR] [--local]
 
 Open the note for the current directory in $VISUAL, or $EDITOR, or vi.
 Saving an empty file deletes the note.
 
-  -d DIR   act on DIR instead of the current directory
+  -d DIR    act on DIR instead of the current directory
+  --local   edit DIR/.dirnote instead of the note in the central store
 `
 
-const rmHelp = `Usage: dirnote rm [-d DIR]
+const rmHelp = `Usage: dirnote rm [-d DIR] [--local]
 
 Delete the note for the current directory. DIR does not have to exist any
 more. Exits 1 if there was no note.
 
-  -d DIR   act on DIR instead of the current directory
+  -d DIR    act on DIR instead of the current directory
+  --local   delete DIR/.dirnote instead of the note in the central store
 `
 
 func (c *cli) add(args []string) error { return c.write("add", args, false) }
@@ -51,6 +55,7 @@ func (c *cli) set(args []string) error { return c.write("set", args, true) }
 func (c *cli) write(name string, args []string, replace bool) error {
 	flags := newFlags(name)
 	dirFlag := flags.String("d", "", "")
+	local := flags.Bool("local", false, "")
 	pos, err := parse(flags, args)
 	if err != nil {
 		return err
@@ -62,6 +67,21 @@ func (c *cli) write(name string, args []string, replace bool) error {
 	text, err := c.noteText(pos)
 	if err != nil {
 		return err
+	}
+
+	if *local {
+		if !replace {
+			if old, ok, err := notes.ReadLocal(dir); err != nil {
+				return err
+			} else if ok {
+				text = old + "\n" + text
+			}
+		}
+		if err := notes.WriteLocal(dir, text); err != nil {
+			return err
+		}
+		fmt.Fprintf(c.stdout, "saved note in %s\n", tildify(notes.LocalPath(dir)))
+		return nil
 	}
 
 	st, err := loadStore()
@@ -103,12 +123,16 @@ func (c *cli) noteText(pos []string) (string, error) {
 func (c *cli) edit(args []string) error {
 	flags := newFlags("edit")
 	dirFlag := flags.String("d", "", "")
+	local := flags.Bool("local", false, "")
 	if err := noArgs(flags, args); err != nil {
 		return err
 	}
 	dir, err := targetDir(*dirFlag, true)
 	if err != nil {
 		return err
+	}
+	if *local {
+		return c.editLocal(dir)
 	}
 	st, err := loadStore()
 	if err != nil {
@@ -139,6 +163,33 @@ func (c *cli) edit(args []string) error {
 		fmt.Fprintf(c.stdout, "removed note for %s\n", tildify(dir))
 	} else {
 		fmt.Fprintf(c.stdout, "saved note for %s\n", tildify(dir))
+	}
+	return nil
+}
+
+func (c *cli) editLocal(dir string) error {
+	old, _, err := notes.ReadLocal(dir)
+	if err != nil {
+		return err
+	}
+	text, err := c.runEditor(old)
+	if err != nil {
+		return err
+	}
+	path := tildify(notes.LocalPath(dir))
+	switch {
+	case text == old:
+		fmt.Fprintln(c.stdout, "no changes")
+	case text == "":
+		if _, err := notes.RemoveLocal(dir); err != nil {
+			return err
+		}
+		fmt.Fprintf(c.stdout, "removed %s\n", path)
+	default:
+		if err := notes.WriteLocal(dir, text); err != nil {
+			return err
+		}
+		fmt.Fprintf(c.stdout, "saved note in %s\n", path)
 	}
 	return nil
 }
@@ -188,12 +239,24 @@ func editorCommand() string {
 func (c *cli) rm(args []string) error {
 	flags := newFlags("rm")
 	dirFlag := flags.String("d", "", "")
+	local := flags.Bool("local", false, "")
 	if err := noArgs(flags, args); err != nil {
 		return err
 	}
 	dir, err := targetDir(*dirFlag, false)
 	if err != nil {
 		return err
+	}
+	if *local {
+		removed, err := notes.RemoveLocal(dir)
+		if err != nil {
+			return err
+		}
+		if !removed {
+			return errNoNote{dir}
+		}
+		fmt.Fprintf(c.stdout, "removed %s\n", tildify(notes.LocalPath(dir)))
+		return nil
 	}
 	st, err := loadStore()
 	if err != nil {

@@ -319,3 +319,55 @@ func TestJSON(t *testing.T) {
 		t.Fatalf("ls --json = %+v", listed)
 	}
 }
+
+func TestLocalNotes(t *testing.T) {
+	dir := setup(t)
+	if r := runCLI(t, "", "add", "--local", "-d", dir, "use node 20"); r.code != 0 {
+		t.Fatalf("add --local: %+v", r)
+	}
+	runCLI(t, "", "add", "--local", "-d", dir, "make seed before tests")
+	b, err := os.ReadFile(filepath.Join(dir, ".dirnote"))
+	if err != nil || string(b) != "use node 20\nmake seed before tests\n" {
+		t.Fatalf(".dirnote = %q, %v", b, err)
+	}
+	if r := runCLI(t, "", "ls"); r.stdout != "" {
+		t.Fatalf("local notes should stay out of the store: %+v", r)
+	}
+
+	runCLI(t, "", "add", "-d", dir, "personal reminder")
+	r := runCLI(t, "", "show", "--plain", "-d", dir)
+	want := tildify(dir) + ":\n  personal reminder\n" +
+		tildify(filepath.Join(dir, ".dirnote")) + ":\n  use node 20\n  make seed before tests\n"
+	if r.code != 0 || r.stdout != want {
+		t.Fatalf("show both:\n%s\nwant:\n%s", r.stdout, want)
+	}
+
+	runCLI(t, "", "set", "--local", "-d", dir, "replaced")
+	fakeEditor(t, `echo edited >> "$1"`)
+	if r := runCLI(t, "", "edit", "--local", "-d", dir); r.code != 0 {
+		t.Fatalf("edit --local: %+v", r)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, ".dirnote")); string(b) != "replaced\nedited\n" {
+		t.Fatalf(".dirnote after edit = %q", b)
+	}
+
+	if r := runCLI(t, "", "rm", "--local", "-d", dir); r.code != 0 {
+		t.Fatalf("rm --local: %+v", r)
+	}
+	if r := runCLI(t, "", "rm", "--local", "-d", dir); r.code != exitNoNote {
+		t.Fatalf("second rm --local: %+v", r)
+	}
+	if got := noteOf(t, dir); got != "personal reminder" {
+		t.Fatalf("store note should survive rm --local: %q", got)
+	}
+}
+
+func TestHookShowsOnlyLocal(t *testing.T) {
+	dir := setup(t)
+	os.WriteFile(filepath.Join(dir, ".dirnote"), []byte("from the repo \x1b]0;gotcha\x07\n"), 0o644)
+	r := runCLI(t, "", "show", "--hook", "--plain", "-d", dir)
+	want := tildify(filepath.Join(dir, ".dirnote")) + ":\n  from the repo\n"
+	if r.code != 0 || r.stderr != want {
+		t.Fatalf("hook: %+v", r)
+	}
+}

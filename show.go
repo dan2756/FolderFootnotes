@@ -14,8 +14,9 @@ import (
 
 const showHelp = `Usage: dirnote show [-d DIR] [--hook] [--plain] [--json]
 
-Print the note for the current directory in a box sized to the terminal.
-Exits 1 if there is none.
+Print the notes for the current directory in a box sized to the terminal:
+the one in the central store and the directory's .dirnote file, if either
+exists. Exits 1 if there is none.
 
   -d DIR    act on DIR instead of the current directory
   --hook    mode for shell hooks: print to stderr, say nothing and exit 0
@@ -42,7 +43,8 @@ The zsh hook uses add-zsh-hook chpwd, the bash hook wraps PROMPT_COMMAND
 // noteJSON is one note in --json output.
 type noteJSON struct {
 	Dir     string    `json:"dir"`
-	Source  string    `json:"source"`
+	Source  string    `json:"source"` // "store" or "local"
+	File    string    `json:"file"`
 	Text    string    `json:"text"`
 	Created time.Time `json:"created,omitzero"`
 	Updated time.Time `json:"updated,omitzero"`
@@ -65,39 +67,43 @@ func (c *cli) show(args []string) error {
 		// Hook mode runs on every cd: stay quiet unless there is something
 		// to show, keep stdout clean for command substitutions, and never
 		// make the shell report a failure.
-		dir, n, err := findNote(*dirFlag)
+		_, entries, err := findNotes(*dirFlag)
 		if err != nil {
 			fmt.Fprintf(c.stderr, "dirnote: %v\n", err)
-		} else if n != nil {
-			printSections(c.stderr, []render.Section{{Label: tildify(dir), Text: n.Text}}, *plain)
+		}
+		if len(entries) > 0 {
+			printSections(c.stderr, sections(entries), *plain)
 		}
 		return nil
 	}
 
-	dir, n, err := findNote(*dirFlag)
-	if err != nil {
+	dir, entries, err := findNotes(*dirFlag)
+	if err != nil && len(entries) == 0 {
 		return err
 	}
 	if *asJSON {
 		out := []noteJSON{}
-		if n != nil {
-			out = append(out, noteJSON{Dir: dir, Source: "store", Text: n.Text, Created: n.Created, Updated: n.Updated})
+		for _, e := range entries {
+			out = append(out, noteJSON{e.Dir, string(e.Source), e.File, e.Text, e.Created, e.Updated})
 		}
 		if err := writeJSON(c.stdout, out); err != nil {
 			return err
 		}
-	} else if n != nil {
-		printSections(c.stdout, []render.Section{{Label: tildify(dir), Text: n.Text}}, *plain)
+	} else if len(entries) > 0 {
+		printSections(c.stdout, sections(entries), *plain)
 	}
-	if n == nil {
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
 		return errNoNote{dir}
 	}
 	return nil
 }
 
-// findNote returns the resolved directory named by dirFlag and its note,
-// which is nil if there is none.
-func findNote(dirFlag string) (string, *notes.Note, error) {
+// findNotes returns the resolved directory named by dirFlag and the notes
+// that apply to it.
+func findNotes(dirFlag string) (string, []notes.Entry, error) {
 	dir, err := targetDir(dirFlag, false)
 	if err != nil {
 		return "", nil, err
@@ -106,8 +112,22 @@ func findNote(dirFlag string) (string, *notes.Note, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	n, _ := st.Get(dir)
-	return dir, n, nil
+	entries, err := notes.Collect(st, dir)
+	return dir, entries, err
+}
+
+// sections labels each note with its directory, or with the .dirnote file
+// it came from.
+func sections(entries []notes.Entry) []render.Section {
+	secs := make([]render.Section, len(entries))
+	for i, e := range entries {
+		label := e.Dir
+		if e.Source == notes.SourceLocal {
+			label = e.File
+		}
+		secs[i] = render.Section{Label: tildify(label), Text: e.Text}
+	}
+	return secs
 }
 
 func printSections(w io.Writer, secs []render.Section, plain bool) {
