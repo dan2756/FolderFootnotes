@@ -101,9 +101,6 @@ hanging indent when they wrap. The directory label is dimmed on terminals that
 support it. Use `--plain` for no box and no color, and set `NO_COLOR` to keep
 the box but drop the escapes.
 
-Notes live in `$XDG_DATA_HOME/dirnote/notes.json`
-(`~/.local/share/dirnote/notes.json` by default). Set `DIRNOTE_FILE` to use
-another file.
 
 ## Shell hook
 
@@ -127,7 +124,51 @@ dirnote init fish | source
   An existing `PROMPT_COMMAND` is kept.
 - **fish** uses a function with `--on-variable PWD`.
 
-Each one calls `dirnote show --hook`, which prints nothing when the directory
-has no note, writes notes to **stderr** (so `$(cd dir && pwd)` style command
-substitutions are never polluted) and always exits 0. The hook also runs once
-when the shell starts, so a new terminal opened in a project shows its note.
+Each one calls `dirnote show --hook --from "$previous_dir"`, which prints
+nothing when the directory has no note, writes notes to **stderr** (so
+`$(cd dir && pwd)` style command substitutions are never polluted) and always
+exits 0. The hook also runs once when the shell starts, so a new terminal
+opened in a project shows its note. The zsh and fish hooks skip subshells and
+command substitutions; the bash hook keeps `$?` intact for prompts that show
+the last exit status.
+
+Flags given to `init` are passed on to the hook:
+
+```sh
+eval "$(dirnote init zsh --inherit)"   # see below
+eval "$(dirnote init bash --plain)"    # no box, no colors
+```
+
+## Notes from parent directories
+
+With `--inherit` (or `DIRNOTE_INHERIT=1` in the environment), `show` also
+prints the notes of every parent directory, closest first. So a note on
+`~/src/api` is still shown when you open a terminal in `~/src/api/internal/db`.
+
+In hook mode that would get noisy, so a parent's note is only shown when you
+*enter its subtree from outside*:
+
+```
+~ $ cd ~/src/api/internal/db      # shows the ~/src/api note: you just arrived
+db $ cd ../http                   # nothing: still inside ~/src/api
+http $ cd ~                       # nothing
+~ $ cd ~/src/api                  # its own note, as always
+```
+
+A directory's own note is shown every time you `cd` into it.
+
+## Configuration
+
+| variable | effect |
+| -------- | ------ |
+| `DIRNOTE_FILE` | path of the note store (default `$XDG_DATA_HOME/dirnote/notes.json`) |
+| `XDG_DATA_HOME` | base for the default store (default `~/.local/share`) |
+| `DIRNOTE_INHERIT` | `1`/`true`/`yes`/`on` turns on `--inherit` for `show` |
+| `NO_COLOR` | no ANSI colors |
+| `COLUMNS` | width to wrap to when the output is not a terminal (default 80) |
+| `VISUAL`, `EDITOR` | editor for `dirnote edit` |
+
+The store is a plain JSON file keyed by absolute, symlink-resolved directory
+paths, so `~/src/api` and a symlink pointing at it share one note. Every
+write goes to a temporary file that is renamed over the old one, so a crash or
+a second shell writing at the same time can never leave a half-written store.

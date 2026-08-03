@@ -90,12 +90,12 @@ func TestWriteLocalKeepsMode(t *testing.T) {
 func TestCollectBothSources(t *testing.T) {
 	dir := tempDir(t)
 	st := &Store{Path: "/store.json", Notes: map[string]*Note{}}
-	if got, err := Collect(st, dir); len(got) != 0 || err != nil {
+	if got, err := Collect(st, dir, Options{}); len(got) != 0 || err != nil {
 		t.Fatalf("nothing yet: %v %v", got, err)
 	}
 	st.Set(dir, "mine", time.Now())
 	WriteLocal(dir, "shipped with the repo")
-	got, err := Collect(st, dir)
+	got, err := Collect(st, dir, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

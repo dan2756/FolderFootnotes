@@ -371,3 +371,66 @@ func TestHookShowsOnlyLocal(t *testing.T) {
 		t.Fatalf("hook: %+v", r)
 	}
 }
+
+func TestInheritHook(t *testing.T) {
+	root := setup(t)
+	t.Setenv("DIRNOTE_INHERIT", "")
+	proj := filepath.Join(root, "proj")
+	pkg := filepath.Join(proj, "src", "pkg")
+	other := filepath.Join(root, "other")
+	for _, d := range []string{pkg, other} {
+		os.MkdirAll(d, 0o755)
+	}
+	runCLI(t, "", "add", "-d", proj, "run make dev first")
+
+	hook := func(args ...string) string {
+		t.Helper()
+		r := runCLI(t, "", append([]string{"show", "--hook", "--plain"}, args...)...)
+		if r.code != 0 || r.stdout != "" {
+			t.Fatalf("hook %v: %+v", args, r)
+		}
+		return r.stderr
+	}
+	projNote := tildify(proj) + ":\n  run make dev first\n"
+
+	if got := hook("-d", pkg, "--from", other); got != "" {
+		t.Errorf("without --inherit a subdirectory shows nothing, got %q", got)
+	}
+	if got := hook("-d", pkg, "--from", other, "--inherit"); got != projNote {
+		t.Errorf("entering from outside: %q", got)
+	}
+	if got := hook("-d", pkg, "--from", proj, "--inherit"); got != "" {
+		t.Errorf("moving inside the project: %q", got)
+	}
+	if got := hook("-d", proj, "--from", proj, "--inherit"); got != "" {
+		t.Errorf("same directory: %q", got)
+	}
+
+	t.Setenv("DIRNOTE_INHERIT", "1")
+	if got := hook("-d", pkg, "--from", other); got != projNote {
+		t.Errorf("DIRNOTE_INHERIT=1: %q", got)
+	}
+	if got := hook("-d", pkg, "--from", other, "--inherit=false"); got != "" {
+		t.Errorf("--inherit=false should override the env: %q", got)
+	}
+
+	r := runCLI(t, "", "show", "--json", "-d", pkg)
+	var shown []noteJSON
+	if err := json.Unmarshal([]byte(r.stdout), &shown); err != nil || len(shown) != 1 || !shown[0].Inherited || shown[0].Dir != proj {
+		t.Errorf("show --json with inherit: %v %+v", err, r)
+	}
+
+	if r := runCLI(t, "", "show", "--from", other); r.code != exitError {
+		t.Errorf("--from without --hook should be rejected: %+v", r)
+	}
+}
+
+func TestInitFlags(t *testing.T) {
+	r := runCLI(t, "", "init", "zsh", "--inherit")
+	if r.code != 0 || !strings.Contains(r.stdout, "show --hook --inherit --from") {
+		t.Fatalf("init zsh --inherit: %+v", r)
+	}
+	if r := runCLI(t, "", "init", "bash", "--bogus"); r.code != exitError {
+		t.Fatalf("unknown init flag: %+v", r)
+	}
+}

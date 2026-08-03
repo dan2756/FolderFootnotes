@@ -20,18 +20,19 @@ var version string
 const usage = `dirnote - leave a note on a directory, see it when you cd in
 
 Usage:
-  dirnote add [-d DIR] TEXT...    append to the note for a directory
-  dirnote set [-d DIR] TEXT...    replace the note
-  dirnote edit [-d DIR]           edit the note in $VISUAL / $EDITOR
-  dirnote show [-d DIR]           print the note (the default command)
-  dirnote rm [-d DIR]             delete the note
-  dirnote ls [--json]             list every note
-  dirnote prune [-n]              delete notes for directories that are gone
-  dirnote init zsh|bash|fish      print the shell hook that shows notes on cd
+  dirnote add [-d DIR] [--local] TEXT...  append to the note for a directory
+  dirnote set [-d DIR] [--local] TEXT...  replace the note
+  dirnote edit [-d DIR] [--local]         edit the note in $VISUAL / $EDITOR
+  dirnote show [-d DIR] [--inherit]       print the notes (the default command)
+  dirnote rm [-d DIR] [--local]           delete the note
+  dirnote ls [--json]                     list every note in the store
+  dirnote prune [-n]                      drop notes for deleted directories
+  dirnote init zsh|bash|fish [--inherit]  print the shell hook
 
 Commands act on the current directory unless -d is given. Notes are kept in
 $XDG_DATA_HOME/dirnote/notes.json (~/.local/share/dirnote/notes.json), or in
-$DIRNOTE_FILE if set.
+$DIRNOTE_FILE if set; with --local, in a .dirnote file in the directory.
+Set DIRNOTE_INHERIT=1 to always include the notes of parent directories.
 
 To see notes as you cd around, add one of these to your shell's rc file:
   eval "$(dirnote init zsh)"     # ~/.zshrc
