@@ -434,3 +434,84 @@ func TestInitFlags(t *testing.T) {
 		t.Fatalf("unknown init flag: %+v", r)
 	}
 }
+
+func TestEditKeepsNotesSavedMeanwhile(t *testing.T) {
+	dir := setup(t)
+	runCLI(t, "", "add", "-d", dir, "original")
+	// Another dirnote process saves a note while the editor is open.
+	other := `{"version":1,"notes":{"/elsewhere":{"text":"saved meanwhile","created":"2026-06-03T12:00:00Z","updated":"2026-06-03T12:00:00Z"}}}`
+	fakeEditor(t, `printf '%s\n' '`+other+`' > "$DIRNOTE_FILE"; echo edited > "$1"`)
+	if r := runCLI(t, "", "edit", "-d", dir); r.code != 0 {
+		t.Fatalf("edit: %+v", r)
+	}
+	if got := noteOf(t, dir); got != "edited" {
+		t.Fatalf("note = %q", got)
+	}
+	r := runCLI(t, "", "show", "--plain", "-d", "/elsewhere")
+	if r.code != 0 || !strings.Contains(r.stdout, "saved meanwhile") {
+		t.Fatalf("note saved during the edit was lost: %+v", r)
+	}
+}
+
+func TestLocalSymlinkTargetNotCopied(t *testing.T) {
+	dir := setup(t)
+	secret := filepath.Join(t.TempDir(), "id_ed25519")
+	os.WriteFile(secret, []byte("PRIVATE KEY\n"), 0o600)
+	link := filepath.Join(dir, ".dirnote")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Fatal(err)
+	}
+	if r := runCLI(t, "", "add", "--local", "-d", dir, "use node 20"); r.code != 0 {
+		t.Fatalf("add --local: %+v", r)
+	}
+	if b, _ := os.ReadFile(link); string(b) != "use node 20\n" {
+		t.Fatalf(".dirnote = %q, want only the new text", b)
+	}
+	if b, _ := os.ReadFile(secret); string(b) != "PRIVATE KEY\n" {
+		t.Fatalf("link target changed: %q", b)
+	}
+
+	os.Remove(link)
+	os.Symlink(secret, link)
+	fakeEditor(t, `[ -s "$1" ] && exit 1; echo edited > "$1"`)
+	if r := runCLI(t, "", "edit", "--local", "-d", dir); r.code != 0 {
+		t.Fatalf("edit --local should start empty: %+v", r)
+	}
+}
+
+func TestMessagesStripEscapes(t *testing.T) {
+	root := setup(t)
+	dir := filepath.Join(root, "docs\x1b]52;c;cHduZWQ=\x07")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Skip("file system refuses the name:", err)
+	}
+	check := func(what string, r result) {
+		t.Helper()
+		if strings.ContainsAny(r.stdout+r.stderr, "\x1b\x07") {
+			t.Errorf("%s printed an escape sequence: %+v", what, r)
+		}
+	}
+	check("show", runCLI(t, "", "show", "-d", dir))
+	check("add", runCLI(t, "", "add", "-d", dir, "hi"))
+	check("ls", runCLI(t, "", "ls"))
+	check("rm", runCLI(t, "", "rm", "-d", dir))
+	os.Symlink(".dirnote", filepath.Join(dir, ".dirnote")) // a loop: unreadable
+	r := runCLI(t, "", "show", "--hook", "--from", root, "-d", dir)
+	if r.stderr == "" {
+		t.Fatalf("hook should report the unreadable .dirnote: %+v", r)
+	}
+	check("hook", r)
+}
+
+func TestShowJSONStripsLocalText(t *testing.T) {
+	dir := setup(t)
+	os.WriteFile(filepath.Join(dir, ".dirnote"), []byte("hello \x1b]0;PWNED\x07 ‮evil\n"), 0o644)
+	r := runCLI(t, "", "show", "--json", "-d", dir)
+	var shown []noteJSON
+	if err := json.Unmarshal([]byte(r.stdout), &shown); err != nil || len(shown) != 1 {
+		t.Fatalf("show --json: %v %+v", err, r)
+	}
+	if shown[0].Text != "hello  evil" {
+		t.Fatalf("text = %q", shown[0].Text)
+	}
+}

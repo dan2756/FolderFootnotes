@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/dan2756/dirnote/internal/notes"
 )
@@ -68,35 +69,24 @@ func (c *cli) write(name string, args []string, replace bool) error {
 	if err != nil {
 		return err
 	}
-
-	if *local {
-		if !replace {
-			if old, ok, err := notes.ReadLocal(dir); err != nil {
-				return err
-			} else if ok {
-				text = old + "\n" + text
-			}
-		}
-		if err := notes.WriteLocal(dir, text); err != nil {
-			return err
-		}
-		fmt.Fprintf(c.stdout, "saved note in %s\n", tildify(notes.LocalPath(dir)))
-		return nil
-	}
-
-	st, err := loadStore()
+	ref, err := openNote(dir, *local)
 	if err != nil {
 		return err
 	}
-	if replace {
-		st.Set(dir, text, c.now())
-	} else {
-		st.Append(dir, text, c.now())
+	defer ref.close()
+	if !replace {
+		old, err := ref.get()
+		if err != nil {
+			return err
+		}
+		if old != "" {
+			text = old + "\n" + text
+		}
 	}
-	if err := st.Save(); err != nil {
+	if err := ref.put(text, c.now()); err != nil {
 		return err
 	}
-	fmt.Fprintf(c.stdout, "saved note for %s\n", tildify(dir))
+	fmt.Fprintf(c.stdout, "saved %s\n", ref)
 	return nil
 }
 
@@ -131,66 +121,42 @@ func (c *cli) edit(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *local {
-		return c.editLocal(dir)
-	}
-	st, err := loadStore()
+	ref, err := openNote(dir, *local)
 	if err != nil {
 		return err
 	}
-	var old string
-	if n, ok := st.Get(dir); ok {
-		old = n.Text
+	old, err := ref.get()
+	ref.close() // not held while the editor is open
+	if err != nil {
+		return err
 	}
 	text, err := c.runEditor(old)
 	if err != nil {
 		return err
 	}
-
-	switch {
-	case text == old:
+	if text == old {
 		fmt.Fprintln(c.stdout, "no changes")
 		return nil
-	case text == "":
-		st.Remove(dir)
-	default:
-		st.Set(dir, text, c.now())
 	}
-	if err := st.Save(); err != nil {
-		return err
-	}
-	if text == "" {
-		fmt.Fprintf(c.stdout, "removed note for %s\n", tildify(dir))
-	} else {
-		fmt.Fprintf(c.stdout, "saved note for %s\n", tildify(dir))
-	}
-	return nil
-}
 
-func (c *cli) editLocal(dir string) error {
-	old, _, err := notes.ReadLocal(dir)
+	// Other notes may have been saved while the editor was open: apply the
+	// change to the store as it is now, not to the copy read before.
+	ref, err = openNote(dir, *local)
 	if err != nil {
 		return err
 	}
-	text, err := c.runEditor(old)
-	if err != nil {
+	defer ref.close()
+	if text == "" {
+		if _, err := ref.remove(); err != nil {
+			return err
+		}
+		fmt.Fprintf(c.stdout, "removed %s\n", ref)
+		return nil
+	}
+	if err := ref.put(text, c.now()); err != nil {
 		return err
 	}
-	path := tildify(notes.LocalPath(dir))
-	switch {
-	case text == old:
-		fmt.Fprintln(c.stdout, "no changes")
-	case text == "":
-		if _, err := notes.RemoveLocal(dir); err != nil {
-			return err
-		}
-		fmt.Fprintf(c.stdout, "removed %s\n", path)
-	default:
-		if err := notes.WriteLocal(dir, text); err != nil {
-			return err
-		}
-		fmt.Fprintf(c.stdout, "saved note in %s\n", path)
-	}
+	fmt.Fprintf(c.stdout, "saved %s\n", ref)
 	return nil
 }
 
@@ -247,35 +213,102 @@ func (c *cli) rm(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *local {
-		removed, err := notes.RemoveLocal(dir)
-		if err != nil {
-			return err
-		}
-		if !removed {
-			return errNoNote{dir}
-		}
-		fmt.Fprintf(c.stdout, "removed %s\n", tildify(notes.LocalPath(dir)))
-		return nil
-	}
-	st, err := loadStore()
+	ref, err := openNote(dir, *local)
 	if err != nil {
 		return err
 	}
-	if !st.Remove(dir) {
-		return errNoNote{dir}
-	}
-	if err := st.Save(); err != nil {
+	defer ref.close()
+	removed, err := ref.remove()
+	if err != nil {
 		return err
 	}
-	fmt.Fprintf(c.stdout, "removed note for %s\n", tildify(dir))
+	if !removed {
+		return errNoNote{dir: dir, local: *local}
+	}
+	fmt.Fprintf(c.stdout, "removed %s\n", ref)
 	return nil
 }
 
-func loadStore() (*notes.Store, error) {
+// noteRef is the note that add, set, edit and rm change: dir's entry in the
+// central store, or with --local its .dirnote file.
+type noteRef struct {
+	dir string
+	st  *notes.Store // nil for a .dirnote file
+}
+
+// openNote opens dir's note for changing. The store stays locked against
+// other dirnote processes until close, so that notes they save meanwhile are
+// not overwritten.
+func openNote(dir string, local bool) (*noteRef, error) {
+	if local {
+		return &noteRef{dir: dir}, nil
+	}
+	st, err := loadStore(true)
+	if err != nil {
+		return nil, err
+	}
+	return &noteRef{dir: dir, st: st}, nil
+}
+
+func (r *noteRef) close() {
+	if r.st != nil {
+		r.st.Unlock()
+	}
+}
+
+// String names the note in messages.
+func (r *noteRef) String() string {
+	if r.st == nil {
+		return tildify(notes.LocalPath(r.dir))
+	}
+	return "note for " + tildify(r.dir)
+}
+
+func (r *noteRef) get() (string, error) {
+	if r.st == nil {
+		// A symlinked .dirnote is replaced, not written through, and what
+		// it points to (in a cloned repository, any file at all) must not
+		// be copied into the new one.
+		if fi, err := os.Lstat(notes.LocalPath(r.dir)); err == nil && fi.Mode()&fs.ModeSymlink != 0 {
+			return "", nil
+		}
+		text, _, err := notes.ReadLocal(r.dir)
+		return text, err
+	}
+	if n, ok := r.st.Get(r.dir); ok {
+		return n.Text, nil
+	}
+	return "", nil
+}
+
+func (r *noteRef) put(text string, now time.Time) error {
+	if r.st == nil {
+		return notes.WriteLocal(r.dir, text)
+	}
+	r.st.Set(r.dir, text, now)
+	return r.st.Save()
+}
+
+// remove deletes the note and reports whether there was one.
+func (r *noteRef) remove() (bool, error) {
+	if r.st == nil {
+		return notes.RemoveLocal(r.dir)
+	}
+	if !r.st.Remove(r.dir) {
+		return false, nil
+	}
+	return true, r.st.Save()
+}
+
+// loadStore reads the central store. With lock it stays locked against
+// other dirnote processes until Unlock, which commands that change it need.
+func loadStore(lock bool) (*notes.Store, error) {
 	path, err := notes.DefaultPath()
 	if err != nil {
 		return nil, err
+	}
+	if lock {
+		return notes.LoadLocked(path)
 	}
 	return notes.Load(path)
 }

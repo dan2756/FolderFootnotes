@@ -105,3 +105,21 @@ func TestCollectBothSources(t *testing.T) {
 		t.Fatalf("Collect = %+v", got)
 	}
 }
+
+func TestWriteLocalDoesNotFollowSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	victim := filepath.Join(t.TempDir(), "bashrc")
+	os.WriteFile(victim, []byte("precious\n"), 0o644)
+	if err := os.Symlink(victim, LocalPath(dir)); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteLocal(dir, "note"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(victim); string(b) != "precious\n" {
+		t.Fatalf("write went through the .dirnote symlink: %q", b)
+	}
+	if fi, _ := os.Lstat(LocalPath(dir)); !fi.Mode().IsRegular() {
+		t.Fatalf(".dirnote should now be a regular file, is %v", fi.Mode())
+	}
+}

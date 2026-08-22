@@ -38,7 +38,7 @@ func (c *cli) ls(args []string) error {
 	if err := noArgs(flags, args); err != nil {
 		return err
 	}
-	st, err := loadStore()
+	st, err := loadStore(false)
 	if err != nil {
 		return err
 	}
@@ -76,10 +76,11 @@ func (c *cli) prune(args []string) error {
 	if err := noArgs(flags, args); err != nil {
 		return err
 	}
-	st, err := loadStore()
+	st, err := loadStore(!*dryRun)
 	if err != nil {
 		return err
 	}
+	defer st.Unlock()
 	gone := st.Prune(dirExists)
 	if len(gone) == 0 {
 		fmt.Fprintln(c.stderr, "nothing to prune")

@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWrap(t *testing.T) {
@@ -40,6 +41,17 @@ func TestWrap(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWrapLongWordIsLinear(t *testing.T) {
+	start := time.Now()
+	got := Wrap(strings.Repeat("b", 256<<10), 10)
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("wrapping a 256 KiB word took %v", d)
+	}
+	if len(got) != 256<<10/10+1 || got[0] != "bbbbbbbbbb" || got[len(got)-1] != "bbbb" {
+		t.Errorf("got %d lines, first %q, last %q", len(got), got[0], got[len(got)-1])
 	}
 }
 
@@ -132,6 +144,12 @@ func TestWidth(t *testing.T) {
 		"é":  1, // combining accent
 		"👍":   2,
 		"│ ─": 3,
+		"✅":   2,
+		"⚡":   2,
+		"☕":   2,
+		"⭐":   2,
+		"🟢":   2,
+		"✓":   1,
 	} {
 		if got := Width(s); got != want {
 			t.Errorf("Width(%q) = %d, want %d", s, got, want)

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+	"unicode/utf8"
 )
 
 // Note is the note attached to one directory in the central store.
@@ -26,6 +27,8 @@ type Note struct {
 type Store struct {
 	Path  string
 	Notes map[string]*Note
+
+	lock *os.File // held from LoadLocked until Unlock
 }
 
 const storeVersion = 1
@@ -81,17 +84,70 @@ func Load(path string) (*Store, error) {
 	return s, nil
 }
 
+// LoadLocked is Load for a store that is about to be changed. It first
+// takes an exclusive lock on path+".lock", waiting while another dirnote
+// process holds it, and keeps it until Unlock. Two processes that each load
+// the store, change it and save it would otherwise lose one of the changes.
+func LoadLocked(path string) (*Store, error) {
+	f, err := lockFile(path + ".lock")
+	if err != nil {
+		return nil, err
+	}
+	s, err := Load(path)
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	s.lock = f
+	return s, nil
+}
+
+// Unlock releases the lock taken by LoadLocked, if any.
+func (s *Store) Unlock() {
+	if s.lock != nil {
+		s.lock.Close()
+		s.lock = nil
+	}
+}
+
+// lockFile opens path, creating it and its directory if needed, and waits
+// for an exclusive lock on it, which lasts until the file is closed.
+func lockFile(path string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := flock(f); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("locking %s: %w", path, err)
+	}
+	return f, nil
+}
+
 // Save writes the store atomically: other processes see either the old file
-// or the new one, never a partial write.
+// or the new one, never a partial write. If the store is a symlink (into a
+// dotfiles repository, say) the file it points to is replaced and the link
+// stays as it is.
 func (s *Store) Save() error {
+	for dir := range s.Notes {
+		// JSON would silently turn the invalid bytes into U+FFFD, and the
+		// note would never be found under its directory again.
+		if !utf8.ValidString(dir) {
+			return fmt.Errorf("cannot store a note for %q: the path is not valid UTF-8", dir)
+		}
+	}
 	data, err := json.MarshalIndent(storeFile{Version: storeVersion, Notes: s.Notes}, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.Path), 0o700); err != nil {
+	path := linkTarget(s.Path)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	return writeFileAtomic(s.Path, append(data, '\n'), 0o600)
+	return writeFileAtomic(path, append(data, '\n'), 0o600)
 }
 
 // Get returns the note for dir.
@@ -100,24 +156,16 @@ func (s *Store) Get(dir string) (*Note, bool) {
 	return n, ok
 }
 
-// Set replaces the note for dir with text.
+// Set replaces the note for dir with text. Times are kept in UTC, to the
+// second.
 func (s *Store) Set(dir, text string, now time.Time) {
+	now = now.UTC().Truncate(time.Second)
 	if n, ok := s.Notes[dir]; ok {
 		n.Text = text
 		n.Updated = now
 		return
 	}
 	s.Notes[dir] = &Note{Text: text, Created: now, Updated: now}
-}
-
-// Append adds text to the note for dir on a new line, creating the note if
-// there is none yet.
-func (s *Store) Append(dir, text string, now time.Time) {
-	if n, ok := s.Notes[dir]; ok && n.Text != "" {
-		s.Set(dir, n.Text+"\n"+text, now)
-		return
-	}
-	s.Set(dir, text, now)
 }
 
 // Remove deletes the note for dir and reports whether there was one.

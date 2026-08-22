@@ -76,16 +76,14 @@ func (c *cli) show(args []string) error {
 	if *hook && *asJSON {
 		return errUsage{"--hook and --json cannot be combined"}
 	}
+	if *from != "" && !*hook {
+		return errUsage{"--from only applies with --hook"}
+	}
 	opt := notes.Options{Inherit: *inherit}
 	if *from != "" {
-		if !*hook {
-			return errUsage{"--from only applies with --hook"}
+		if f, err := notes.Resolve(*from); err == nil {
+			opt.From = f
 		}
-		f, err := notes.Resolve(*from)
-		if err != nil {
-			return err
-		}
-		opt.From = f
 	}
 
 	if *hook {
@@ -94,7 +92,7 @@ func (c *cli) show(args []string) error {
 		// make the shell report a failure.
 		_, entries, err := findNotes(*dirFlag, opt)
 		if err != nil {
-			fmt.Fprintf(c.stderr, "dirnote: %v\n", err)
+			fmt.Fprintf(c.stderr, "dirnote: %s\n", message(err))
 		}
 		if len(entries) > 0 {
 			printSections(c.stderr, sections(entries), *plain)
@@ -109,7 +107,12 @@ func (c *cli) show(args []string) error {
 	if *asJSON {
 		out := []noteJSON{}
 		for _, e := range entries {
-			out = append(out, noteJSON{e.Dir, string(e.Source), e.File, e.Text, e.Created, e.Updated, e.Inherited})
+			text := e.Text
+			if e.Source == notes.SourceLocal {
+				// Untrusted, and scripts print it: strip it as the box does.
+				text = render.Sanitize(text)
+			}
+			out = append(out, noteJSON{e.Dir, string(e.Source), e.File, text, e.Created, e.Updated, e.Inherited})
 		}
 		if err := writeJSON(c.stdout, out); err != nil {
 			return err
@@ -121,7 +124,7 @@ func (c *cli) show(args []string) error {
 		return err
 	}
 	if len(entries) == 0 {
-		return errNoNote{dir}
+		return errNoNote{dir: dir}
 	}
 	return nil
 }
@@ -133,7 +136,7 @@ func findNotes(dirFlag string, opt notes.Options) (string, []notes.Entry, error)
 	if err != nil {
 		return "", nil, err
 	}
-	st, err := loadStore()
+	st, err := loadStore(false)
 	if err != nil {
 		return "", nil, err
 	}

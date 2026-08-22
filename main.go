@@ -12,6 +12,9 @@ import (
 	"runtime/debug"
 	"strings"
 	"time"
+
+	"github.com/dan2756/dirnote/internal/notes"
+	"github.com/dan2756/dirnote/internal/render"
 )
 
 // version is set at build time with -ldflags "-X main.version=v1.2.3".
@@ -48,19 +51,15 @@ type command struct {
 	run  func(c *cli, args []string) error
 }
 
-var commands []command
-
-func init() {
-	commands = []command{
-		{"add", addHelp, (*cli).add},
-		{"set", setHelp, (*cli).set},
-		{"edit", editHelp, (*cli).edit},
-		{"show", showHelp, (*cli).show},
-		{"rm", rmHelp, (*cli).rm},
-		{"ls", lsHelp, (*cli).ls},
-		{"prune", pruneHelp, (*cli).prune},
-		{"init", initHelp, (*cli).initShell},
-	}
+var commands = []command{
+	{"add", addHelp, (*cli).add},
+	{"set", setHelp, (*cli).set},
+	{"edit", editHelp, (*cli).edit},
+	{"show", showHelp, (*cli).show},
+	{"rm", rmHelp, (*cli).rm},
+	{"ls", lsHelp, (*cli).ls},
+	{"prune", pruneHelp, (*cli).prune},
+	{"init", initHelp, (*cli).initShell},
 }
 
 // cli holds what commands need from the outside world, so tests can swap it.
@@ -83,10 +82,18 @@ const (
 	exitError  = 2 // bad usage or a real failure
 )
 
-// errNoNote reports that a directory has no note.
-type errNoNote struct{ dir string }
+// errNoNote reports that a directory has no note (or no .dirnote file).
+type errNoNote struct {
+	dir   string
+	local bool
+}
 
-func (e errNoNote) Error() string { return "no note for " + tildify(e.dir) }
+func (e errNoNote) Error() string {
+	if e.local {
+		return "no " + tildify(notes.LocalPath(e.dir))
+	}
+	return "no note for " + tildify(e.dir)
+}
 
 // errUsage is a mistake on the command line.
 type errUsage struct{ msg string }
@@ -130,16 +137,21 @@ func (c *cli) run(args []string) int {
 		fmt.Fprint(c.stdout, cmd.help)
 		return exitOK
 	case errors.As(err, &noNote):
-		fmt.Fprintf(c.stderr, "dirnote: %v\n", err)
+		fmt.Fprintf(c.stderr, "dirnote: %s\n", message(err))
 		return exitNoNote
 	case errors.As(err, &bad):
-		fmt.Fprintf(c.stderr, "dirnote %s: %v\nRun 'dirnote %s -h' for usage.\n", cmd.name, err, cmd.name)
+		fmt.Fprintf(c.stderr, "dirnote %s: %s\nRun 'dirnote %s -h' for usage.\n", cmd.name, message(err), cmd.name)
 		return exitError
 	default:
-		fmt.Fprintf(c.stderr, "dirnote: %v\n", err)
+		fmt.Fprintf(c.stderr, "dirnote: %s\n", message(err))
 		return exitError
 	}
 }
+
+// message returns err's text safe to print: the paths in it can contain
+// directory names from a cloned repository, which must not be able to send
+// escape sequences to the terminal.
+func message(err error) string { return render.Sanitize(err.Error()) }
 
 func lookup(name string) (command, bool) {
 	for _, cmd := range commands {
@@ -234,8 +246,10 @@ func takesValue(fs *flag.FlagSet, name string) bool {
 	return !ok || !b.IsBoolFlag()
 }
 
-// tildify shortens paths under the home directory to ~/...
+// tildify shortens paths under the home directory to ~/... for display,
+// with escape sequences and control characters stripped (see message).
 func tildify(path string) string {
+	path = render.Sanitize(path)
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return path
