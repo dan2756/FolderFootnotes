@@ -277,4 +277,13 @@ func TestSaveRejectsInvalidUTF8(t *testing.T) {
 	if _, err := os.Stat(path); err == nil {
 		t.Error("store written anyway")
 	}
+
+	s, _ = Load(path)
+	s.Set("/home/u/proj", "caf\xe9", time.Now())
+	if err := s.Save(); err == nil || !strings.Contains(err.Error(), "text") {
+		t.Fatalf("invalid UTF-8 note text should be refused, err = %v", err)
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Error("store written anyway")
+	}
 }
