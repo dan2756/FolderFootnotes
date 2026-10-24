@@ -132,11 +132,15 @@ func lockFile(path string) (*os.File, error) {
 // dotfiles repository, say) the file it points to is replaced and the link
 // stays as it is.
 func (s *Store) Save() error {
-	for dir := range s.Notes {
-		// JSON would silently turn the invalid bytes into U+FFFD, and the
-		// note would never be found under its directory again.
+	for dir, n := range s.Notes {
+		// JSON would silently turn the invalid bytes into U+FFFD. A path
+		// would then never match its directory again, and note text would
+		// be saved as something other than what was written.
 		if !utf8.ValidString(dir) {
 			return fmt.Errorf("cannot store a note for %q: the path is not valid UTF-8", dir)
+		}
+		if n != nil && !utf8.ValidString(n.Text) {
+			return fmt.Errorf("cannot store the note for %q: the text is not valid UTF-8", dir)
 		}
 	}
 	data, err := json.MarshalIndent(storeFile{Version: storeVersion, Notes: s.Notes}, "", "  ")

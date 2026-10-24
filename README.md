@@ -269,6 +269,7 @@ dirnote runs on Linux and macOS.
 - Paths are compared exactly. On a case-insensitive volume (the macOS
   default) `cd ~/Src/API` reaches the same directory as `cd ~/src/api` under
   a different name, so stick to one spelling.
-- The store is JSON, which cannot hold a directory name that is not valid
-  UTF-8 (a Latin-1 `café`, say). `add` and `set` refuse such a directory;
-  a `.dirnote` file (`--local`) works there.
+- The store is JSON, which cannot hold bytes that are not valid UTF-8.
+  `add` and `set` refuse a directory whose name is not UTF-8 (a Latin-1
+  `café`, say) and a note whose text is not UTF-8. A `.dirnote` file
+  (`--local`) keeps those bytes as they are.

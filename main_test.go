@@ -91,6 +91,21 @@ func TestAddShowRm(t *testing.T) {
 	}
 }
 
+func TestAddRejectsInvalidUTF8(t *testing.T) {
+	dir := setup(t)
+	r := runCLI(t, "caf\xe9\n", "add", "-d", dir)
+	if r.code != exitError || !strings.Contains(r.stderr, "UTF-8") {
+		t.Fatalf("add: %+v", r)
+	}
+	if r := runCLI(t, "", "show", "-d", dir); r.code != exitNoNote {
+		t.Fatalf("invalid text was stored: %+v", r)
+	}
+	// A .dirnote file is raw bytes, not JSON, so it can keep them.
+	if r := runCLI(t, "caf\xe9\n", "add", "--local", "-d", dir); r.code != 0 {
+		t.Fatalf("add --local: %+v", r)
+	}
+}
+
 func TestAddFromStdin(t *testing.T) {
 	dir := setup(t)
 	if r := runCLI(t, "line one\nline two\n\n", "add", "-d", dir); r.code != 0 {
