@@ -106,6 +106,24 @@ func TestCollectBothSources(t *testing.T) {
 	}
 }
 
+func TestReadLocalDoesNotFollowSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(t.TempDir(), "id_ed25519")
+	if err := os.WriteFile(secret, []byte("PRIVATE KEY\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, LocalPath(dir)); err != nil {
+		t.Fatal(err)
+	}
+	text, ok, err := ReadLocal(dir)
+	if ok || text != "" || err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("ReadLocal = %q ok=%v err=%v, want a symlink error", text, ok, err)
+	}
+	if b, _ := os.ReadFile(secret); string(b) != "PRIVATE KEY\n" {
+		t.Fatalf("symlink target changed: %q", b)
+	}
+}
+
 func TestWriteLocalDoesNotFollowSymlinks(t *testing.T) {
 	dir := t.TempDir()
 	victim := filepath.Join(t.TempDir(), "bashrc")

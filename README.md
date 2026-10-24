@@ -171,8 +171,9 @@ as untrusted:
 - escape sequences, control characters and bidi overrides are stripped
   before anything is printed, from the note and from directory names in
   messages alike;
-- only regular files are read (a FIFO or a link to a device is ignored), and
-  files over 64 KiB are refused;
+- only regular files are read. Symlinks are refused (a `.dirnote` link in a
+  cloned repository could point at any file); directories, FIFOs and devices
+  are ignored. Files over 64 KiB are refused;
 - writing with `--local` replaces a symlinked `.dirnote` rather than writing
   through it, and `add` and `edit` then start from an empty note instead of
   copying in the file the link points to.

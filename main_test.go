@@ -453,6 +453,41 @@ func TestEditKeepsNotesSavedMeanwhile(t *testing.T) {
 	}
 }
 
+func TestShowDoesNotReadSymlinkedDirnote(t *testing.T) {
+	dir := setup(t)
+	outside := filepath.Join(t.TempDir(), "id_ed25519")
+	if err := os.WriteFile(outside, []byte("PRIVATE KEY\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(dir, outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(rel, filepath.Join(dir, ".dirnote")); err != nil {
+		t.Fatal(err)
+	}
+	if r := runCLI(t, "", "add", "-d", dir, "personal reminder"); r.code != 0 {
+		t.Fatalf("add: %+v", r)
+	}
+
+	r := runCLI(t, "", "show", "--plain", "-d", dir)
+	blob := r.stdout + r.stderr
+	if strings.Contains(blob, "PRIVATE KEY") {
+		t.Fatalf("printed the symlink target: %+v", r)
+	}
+	if r.code != exitError || !strings.Contains(r.stderr, "symlink") || !strings.Contains(r.stdout, "personal reminder") {
+		t.Fatalf("show: %+v", r)
+	}
+
+	r = runCLI(t, "", "show", "--hook", "--plain", "-d", dir)
+	if r.code != 0 || r.stdout != "" || strings.Contains(r.stderr, "PRIVATE KEY") {
+		t.Fatalf("hook leaked or failed: %+v", r)
+	}
+	if !strings.Contains(r.stderr, "symlink") || !strings.Contains(r.stderr, "personal reminder") {
+		t.Fatalf("hook: %+v", r)
+	}
+}
+
 func TestLocalSymlinkTargetNotCopied(t *testing.T) {
 	dir := setup(t)
 	secret := filepath.Join(t.TempDir(), "id_ed25519")
