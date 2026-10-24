@@ -450,6 +450,36 @@ func TestInitFlags(t *testing.T) {
 	}
 }
 
+func TestEditKeepsTextWhenSaveFails(t *testing.T) {
+	dir := setup(t)
+	store := os.Getenv("DIRNOTE_FILE")
+	t.Cleanup(func() { os.Chmod(filepath.Dir(store), 0o755) })
+	if r := runCLI(t, "", "add", "-d", dir, "original"); r.code != 0 {
+		t.Fatalf("add: %+v", r)
+	}
+
+	// The store can be read but not replaced: the directory is not writable.
+	fakeEditor(t, `echo edited > "$1"; chmod 555 "$(dirname "$DIRNOTE_FILE")"`)
+	r := runCLI(t, "", "edit", "-d", dir)
+	if r.code != exitError {
+		t.Fatalf("edit: %+v", r)
+	}
+	const marker = "edited text kept in "
+	i := strings.LastIndex(r.stderr, marker)
+	if i < 0 {
+		t.Fatalf("stderr: %s", r.stderr)
+	}
+	path := strings.TrimSpace(r.stderr[i+len(marker):])
+	b, err := os.ReadFile(path)
+	if err != nil || string(b) != "edited\n" {
+		t.Fatalf("rescue file %q: %q, %v", path, b, err)
+	}
+	os.Chmod(filepath.Dir(store), 0o755)
+	if got := noteOf(t, dir); got != "original" {
+		t.Fatalf("note changed despite the failed save: %q", got)
+	}
+}
+
 func TestEditKeepsNotesSavedMeanwhile(t *testing.T) {
 	dir := setup(t)
 	runCLI(t, "", "add", "-d", dir, "original")

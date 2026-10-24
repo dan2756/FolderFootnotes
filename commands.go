@@ -143,7 +143,7 @@ func (c *cli) edit(args []string) error {
 	// change to the store as it is now, not to the copy read before.
 	ref, err = openNote(dir, *local)
 	if err != nil {
-		return err
+		return preserveEdit(text, err)
 	}
 	defer ref.close()
 	if text == "" {
@@ -154,10 +154,33 @@ func (c *cli) edit(args []string) error {
 		return nil
 	}
 	if err := ref.put(text, c.now()); err != nil {
-		return err
+		return preserveEdit(text, err)
 	}
 	fmt.Fprintf(c.stdout, "saved %s\n", ref)
 	return nil
+}
+
+// preserveEdit keeps text on disk when storing an edit failed, so a full
+// disk or a permissions error does not throw away what the editor wrote.
+func preserveEdit(text string, err error) error {
+	if text == "" {
+		return err
+	}
+	f, ferr := os.CreateTemp("", "dirnote-unsaved-*.txt")
+	if ferr != nil {
+		return err
+	}
+	name := f.Name()
+	if _, werr := io.WriteString(f, text+"\n"); werr != nil {
+		f.Close()
+		os.Remove(name)
+		return err
+	}
+	if cerr := f.Close(); cerr != nil {
+		os.Remove(name)
+		return err
+	}
+	return fmt.Errorf("%w; edited text kept in %s", err, name)
 }
 
 // runEditor opens text in the user's editor and returns what they saved,
