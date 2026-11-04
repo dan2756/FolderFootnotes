@@ -114,7 +114,8 @@ dirnote:
   never polluted (the zsh and fish hooks skip subshells and command
   substitutions altogether);
 - always exits 0; a broken store is reported in one line and the shell
-  carries on.
+  carries on. If dirnote cannot be started, the hook does not abort the
+  shell either, including under bash `set -e` and zsh `ERR_EXIT`.
 
 The hook also runs once when the shell starts, so a new terminal opened in a
 project shows its note. Flags given to `init` are passed on to the hook:

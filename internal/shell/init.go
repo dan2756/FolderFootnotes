@@ -34,9 +34,12 @@ func Script(shell string, flags ...string) (string, error) {
 }
 
 // The zsh hook skips subshells so that $(cd dir && ...) stays quiet.
+// emulate -L zsh turns off a caller's ERR_EXIT for the function, so a
+// failure to start dirnote cannot exit the shell.
 const zsh = `# dirnote hook for zsh. Add to ~/.zshrc:
 #   eval "$(dirnote init zsh)"
 _dirnote_hook() {
+  emulate -L zsh
   (( ZSH_SUBSHELL )) && return
   @CMD@ --from "${_dirnote_prev-}"
   typeset -g _dirnote_prev=$PWD
@@ -48,13 +51,15 @@ _dirnote_hook
 
 // bash has no chpwd hook, so the prompt command watches $PWD instead. Any
 // existing PROMPT_COMMAND is kept, and $? is passed through untouched for
-// prompts that show the last exit status.
+// prompts that show the last exit status. "|| true" keeps a failure to
+// start dirnote from tripping set -e and closing the shell; the saved
+// status is what the rest of PROMPT_COMMAND and the prompt still see.
 const bash = `# dirnote hook for bash. Add to ~/.bashrc:
 #   eval "$(dirnote init bash)"
 _dirnote_hook() {
   local status=$?
   if [[ "${_dirnote_prev-}" != "$PWD" ]]; then
-    @CMD@ --from "${_dirnote_prev-}"
+    @CMD@ --from "${_dirnote_prev-}" || true
     _dirnote_prev=$PWD
   fi
   return $status

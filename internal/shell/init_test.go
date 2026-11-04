@@ -12,6 +12,7 @@ func TestScriptContent(t *testing.T) {
 	tests := map[string][]string{
 		"zsh": {
 			`eval "$(dirnote init zsh)"`,
+			"emulate -L zsh",
 			"autoload -Uz add-zsh-hook",
 			"add-zsh-hook chpwd _dirnote_hook",
 			"(( ZSH_SUBSHELL )) && return",
@@ -22,7 +23,7 @@ func TestScriptContent(t *testing.T) {
 			`eval "$(dirnote init bash)"`,
 			`if [[ "${_dirnote_prev-}" != "$PWD" ]]; then`,
 			`PROMPT_COMMAND="_dirnote_hook${PROMPT_COMMAND:+;$PROMPT_COMMAND}"`,
-			`command dirnote show --hook --from "${_dirnote_prev-}"`,
+			`command dirnote show --hook --from "${_dirnote_prev-}" || true`,
 			"return $status",
 		},
 		"fish": {
@@ -120,4 +121,79 @@ echo "status=$?"
 	if string(out) != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", out, want)
 	}
+}
+
+// TestHookFailureDoesNotAbortTheShell checks the two shells whose options
+// would otherwise exit when the hook cannot start dirnote: bash set -e, and
+// zsh ERR_EXIT. The hook still has to run dirnote when it is there.
+func TestHookFailureDoesNotAbortTheShell(t *testing.T) {
+	scriptOf := func(t *testing.T, name string) string {
+		t.Helper()
+		script, err := Script(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return script
+	}
+	run := func(t *testing.T, bin, prog, script, path string) string {
+		t.Helper()
+		args := []string{"--norc", "--noprofile", "-c", prog}
+		if filepath.Base(bin) == "zsh" {
+			args = []string{"-f", "-c", prog}
+		}
+		cmd := exec.Command(bin, args...)
+		cmd.Env = []string{"HOOK=" + script, "PATH=" + path, "HOME=/tmp", "PWD=/tmp"}
+		cmd.Dir = t.TempDir()
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", bin, err, out)
+		}
+		if !strings.Contains(string(out), "survived") {
+			t.Fatalf("%s output:\n%s", bin, out)
+		}
+		return string(out)
+	}
+
+	t.Run("bash", func(t *testing.T) {
+		bash, err := exec.LookPath("bash")
+		if err != nil {
+			t.Skip("bash not installed")
+		}
+		script := scriptOf(t, "bash")
+		// Non-interactive bash does not run PROMPT_COMMAND on its own.
+		prog := "set -e\neval \"$HOOK\"\ncd /tmp\n_dirnote_hook\necho survived\n"
+		run(t, bash, prog, script, "/usr/bin:/bin")
+
+		bin := t.TempDir()
+		stub := "#!/bin/sh\necho \"called $*\"\nexit 0\n"
+		if err := os.WriteFile(filepath.Join(bin, "dirnote"), []byte(stub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		out := run(t, bash, prog, script, bin+string(os.PathListSeparator)+"/usr/bin:/bin")
+		if !strings.Contains(out, "called show --hook --from ") {
+			t.Fatalf("dirnote was not run:\n%s", out)
+		}
+	})
+
+	t.Run("zsh", func(t *testing.T) {
+		zsh, err := exec.LookPath("zsh")
+		if err != nil {
+			t.Skip("zsh not installed")
+		}
+		script := scriptOf(t, "zsh")
+		// The generated script calls the hook once at the end, which is
+		// enough to trip ERR_EXIT when dirnote cannot be started.
+		prog := "setopt err_exit\neval \"$HOOK\"\necho survived\n"
+		run(t, zsh, prog, script, "/usr/bin:/bin")
+
+		bin := t.TempDir()
+		stub := "#!/bin/sh\necho \"called $*\"\nexit 0\n"
+		if err := os.WriteFile(filepath.Join(bin, "dirnote"), []byte(stub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		out := run(t, zsh, prog, script, bin+string(os.PathListSeparator)+"/usr/bin:/bin")
+		if !strings.Contains(out, "called show --hook --from ") {
+			t.Fatalf("dirnote was not run:\n%s", out)
+		}
+	})
 }
