@@ -168,6 +168,9 @@ When both exist, `show` (and the hook) prints both, the central note first:
 ╰───────────────────────────────────────────────╯
 ```
 
+If the central store cannot be read, the `.dirnote` file is still printed
+and the store error is reported with it.
+
 A `.dirnote` file is written by whoever wrote the repo, so dirnote treats it
 as untrusted:
 
