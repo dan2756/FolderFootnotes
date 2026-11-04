@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -130,17 +131,25 @@ func (c *cli) show(args []string) error {
 }
 
 // findNotes returns the resolved directory named by dirFlag and the notes
-// that apply to it.
+// that apply to it. A central store that cannot be read does not hide a
+// .dirnote file; the store error is returned alongside whatever was found.
 func findNotes(dirFlag string, opt notes.Options) (string, []notes.Entry, error) {
 	dir, err := targetDir(dirFlag, false)
 	if err != nil {
 		return "", nil, err
 	}
-	st, err := loadStore(false)
-	if err != nil {
-		return "", nil, err
+	st, loadErr := loadStore(false)
+	if loadErr != nil {
+		st = &notes.Store{Notes: map[string]*notes.Note{}}
 	}
 	entries, err := notes.Collect(st, dir, opt)
+	if loadErr != nil {
+		if err != nil {
+			err = errors.Join(loadErr, err)
+		} else {
+			err = loadErr
+		}
+	}
 	return dir, entries, err
 }
 

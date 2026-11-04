@@ -377,6 +377,27 @@ func TestLocalNotes(t *testing.T) {
 	}
 }
 
+func TestShowLocalNoteWhenStoreIsBroken(t *testing.T) {
+	dir := setup(t)
+	if err := os.WriteFile(filepath.Join(dir, ".dirnote"), []byte("from the repo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("DIRNOTE_FILE"), []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := runCLI(t, "", "show", "--plain", "-d", dir)
+	want := tildify(filepath.Join(dir, ".dirnote")) + ":\n  from the repo\n"
+	if r.code != exitError || r.stdout != want || !strings.Contains(r.stderr, "dirnote:") {
+		t.Fatalf("show: %+v\nwant stdout:\n%s", r, want)
+	}
+
+	r = runCLI(t, "", "show", "--hook", "--plain", "-d", dir)
+	if r.code != 0 || r.stdout != "" || !strings.Contains(r.stderr, "from the repo") || !strings.Contains(r.stderr, "dirnote:") {
+		t.Fatalf("hook: %+v", r)
+	}
+}
+
 func TestHookShowsOnlyLocal(t *testing.T) {
 	dir := setup(t)
 	os.WriteFile(filepath.Join(dir, ".dirnote"), []byte("from the repo \x1b]0;gotcha\x07\n"), 0o644)
