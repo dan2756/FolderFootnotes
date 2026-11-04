@@ -181,6 +181,13 @@ func TestSanitize(t *testing.T) {
 	}
 }
 
+func TestSingleLine(t *testing.T) {
+	got := SingleLine("proj\nevil\tname\r")
+	if got != "proj evil name " {
+		t.Fatalf("SingleLine = %q", got)
+	}
+}
+
 func TestBoxSanitizes(t *testing.T) {
 	got := Box([]Section{{Label: "~/evil\x1b[2J\nrepo", Text: "\x1b]0;title\x07hi\x1b[5m"}}, Options{Width: 80})
 	want := "" +
