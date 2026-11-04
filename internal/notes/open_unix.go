@@ -17,3 +17,9 @@ func openLocal(path string) (*os.File, error) {
 func isSymlinkOpen(err error) bool {
 	return errors.Is(err, syscall.ELOOP)
 }
+
+// isENOTDIR reports whether err is "not a directory": some parent of the
+// path is a file, so the path itself cannot exist.
+func isENOTDIR(err error) bool {
+	return errors.Is(err, syscall.ENOTDIR)
+}

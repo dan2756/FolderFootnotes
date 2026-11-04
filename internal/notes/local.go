@@ -30,7 +30,7 @@ func ReadLocal(dir string) (text string, ok bool, err error) {
 	path := LocalPath(dir)
 	fi, err := os.Lstat(path)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) || isENOTDIR(err) {
 			return "", false, nil
 		}
 		return "", false, err

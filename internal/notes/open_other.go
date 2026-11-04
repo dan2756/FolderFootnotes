@@ -9,3 +9,5 @@ func openLocal(path string) (*os.File, error) {
 }
 
 func isSymlinkOpen(error) bool { return false }
+
+func isENOTDIR(error) bool { return false }
