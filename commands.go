@@ -363,10 +363,17 @@ func targetDir(flagVal string, mustExist bool) (string, error) {
 	return dir, nil
 }
 
-// dirExists reports whether dir is still there. Errors other than "not
-// found" (permissions, an unreadable mount) count as existing so prune
-// never drops a note it isn't sure about.
+// dirExists reports whether dir is still a directory. Errors other than
+// "not found" (permissions, an unreadable mount) count as existing so prune
+// never drops a note it isn't sure about. A file at the path, or a file
+// anywhere along it, means the directory is gone.
 func dirExists(dir string) bool {
-	_, err := os.Stat(dir)
-	return !errors.Is(err, fs.ErrNotExist)
+	fi, err := os.Stat(dir)
+	if err == nil {
+		return fi.IsDir()
+	}
+	if errors.Is(err, fs.ErrNotExist) || isNotADirectory(err) {
+		return false
+	}
+	return true
 }

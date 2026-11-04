@@ -74,6 +74,18 @@ func TestReadLocalIgnoresOddFiles(t *testing.T) {
 	})
 }
 
+func TestReadLocalWhenParentIsFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "notes")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// file/.dirnote cannot exist: a parent component is a file.
+	if text, ok, err := ReadLocal(file); text != "" || ok || err != nil {
+		t.Fatalf("ReadLocal = %q ok=%v err=%v", text, ok, err)
+	}
+}
+
 func TestWriteLocalKeepsMode(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(LocalPath(dir), []byte("old\n"), 0o664)

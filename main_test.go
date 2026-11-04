@@ -166,6 +166,81 @@ func TestLsFlagsMissing(t *testing.T) {
 	}
 }
 
+func TestPruneWhenPathIsNotADirectory(t *testing.T) {
+	dir := setup(t)
+
+	replaced := filepath.Join(dir, "replaced")
+	if err := os.Mkdir(replaced, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if r := runCLI(t, "", "add", "-d", replaced, "was a directory"); r.code != 0 {
+		t.Fatalf("add: %+v", r)
+	}
+	if err := os.Remove(replaced); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(replaced, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	parent := filepath.Join(dir, "parent")
+	child := filepath.Join(parent, "child")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if r := runCLI(t, "", "add", "-d", child, "parent became a file"); r.code != 0 {
+		t.Fatalf("add child: %+v", r)
+	}
+	if err := os.Remove(child); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(parent); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(parent, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The store note is still shown, the same as for a deleted directory.
+	// There is no .dirnote to fail on just because a parent is a file.
+	if r := runCLI(t, "", "show", "--plain", "-d", replaced); r.code != 0 || !strings.Contains(r.stdout, "was a directory") {
+		t.Fatalf("show replaced: %+v", r)
+	}
+	if r := runCLI(t, "", "show", "--plain", "-d", child); r.code != 0 || !strings.Contains(r.stdout, "parent became a file") {
+		t.Fatalf("show child: %+v", r)
+	}
+
+	r := runCLI(t, "", "ls")
+	for _, d := range []string{replaced, child} {
+		if !strings.Contains(r.stdout, tildify(d)+" (missing)\n") {
+			t.Errorf("ls should flag %s missing:\n%s", d, r.stdout)
+		}
+	}
+
+	r = runCLI(t, "", "prune", "-n")
+	for _, d := range []string{replaced, child} {
+		if !strings.Contains(r.stdout, "would delete note for "+tildify(d)+"\n") {
+			t.Errorf("dry run:\n%s", r.stdout)
+		}
+	}
+	if r := runCLI(t, "", "show", "--plain", "-d", replaced); r.code != 0 {
+		t.Fatalf("dry run removed the note: %+v", r)
+	}
+
+	r = runCLI(t, "", "prune")
+	if r.code != 0 {
+		t.Fatalf("prune: %+v", r)
+	}
+	for _, d := range []string{replaced, child} {
+		if !strings.Contains(r.stdout, "deleted note for "+tildify(d)+"\n") {
+			t.Errorf("prune:\n%s", r.stdout)
+		}
+		if r := runCLI(t, "", "show", "-d", d); r.code != exitNoNote {
+			t.Errorf("note for %s still there: %+v", d, r)
+		}
+	}
+}
+
 func TestAddRequiresDirectory(t *testing.T) {
 	dir := setup(t)
 	if r := runCLI(t, "", "add", "-d", filepath.Join(dir, "nope"), "x"); r.code != exitError {

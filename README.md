@@ -68,7 +68,8 @@ like `- seed the db first`, is taken as text; for anything else that looks
 like a flag, put `--` in front (`dirnote add -- -v makes it verbose`).
 
 `prune` only drops a note when its directory is definitely gone; a permission
-error or an unreachable mount counts as "still there". `edit` runs the editor
+error or an unreachable mount counts as "still there". A file at that path,
+or a file anywhere along it, counts as gone. `edit` runs the editor
 through `sh -c`, so values like `EDITOR="code --wait"` work. If saving that
 edit fails, the edited text is left in a temporary file and the path is
 printed.
