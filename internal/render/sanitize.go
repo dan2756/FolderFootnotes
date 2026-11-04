@@ -33,6 +33,20 @@ func Sanitize(s string) string {
 	return b.String()
 }
 
+// SingleLine maps newline and tab to spaces. Sanitize keeps both so that
+// note text can stay multiline; a path or an error message has to stay on
+// one line, or a crafted directory name can forge a second line of output.
+func SingleLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', '\t':
+			return ' '
+		default:
+			return r
+		}
+	}, s)
+}
+
 // escapeLen returns the length of the escape sequence at the start of s,
 // which begins with ESC.
 func escapeLen(s string) int {

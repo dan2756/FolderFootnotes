@@ -195,10 +195,12 @@ func TestUsageErrors(t *testing.T) {
 func TestTildify(t *testing.T) {
 	t.Setenv("HOME", "/home/u")
 	for in, want := range map[string]string{
-		"/home/u":         "~",
-		"/home/u/src/api": "~/src/api",
-		"/home/user":      "/home/user",
-		"/tmp":            "/tmp",
+		"/home/u":                  "~",
+		"/home/u/src/api":          "~/src/api",
+		"/home/u/proj\nevil\tname": "~/proj evil name",
+		"/tmp/proj\nevil":          "/tmp/proj evil",
+		"/home/user":               "/home/user",
+		"/tmp":                     "/tmp",
 	} {
 		if got := tildify(in); got != want {
 			t.Errorf("tildify(%q) = %q, want %q", in, got, want)
@@ -577,6 +579,39 @@ func TestLocalSymlinkTargetNotCopied(t *testing.T) {
 	fakeEditor(t, `[ -s "$1" ] && exit 1; echo edited > "$1"`)
 	if r := runCLI(t, "", "edit", "--local", "-d", dir); r.code != 0 {
 		t.Fatalf("edit --local should start empty: %+v", r)
+	}
+}
+
+func TestDirectoryNewlinesStayOnOneLine(t *testing.T) {
+	root := setup(t)
+	dir := filepath.Join(root, "proj\nevil\tname")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Skip("file system refuses the name:", err)
+	}
+	oneLine := func(what, s string) {
+		t.Helper()
+		if body := strings.TrimSuffix(s, "\n"); strings.ContainsAny(body, "\n\t") {
+			t.Errorf("%s is not one line: %q", what, s)
+		}
+	}
+
+	r := runCLI(t, "", "show", "-d", dir)
+	oneLine("show", r.stderr)
+	if !strings.Contains(r.stderr, "proj evil name") {
+		t.Fatalf("show: %+v", r)
+	}
+
+	r = runCLI(t, "", "add", "-d", dir, "hello")
+	oneLine("add", r.stdout)
+	if r.code != 0 || !strings.Contains(r.stdout, "proj evil name") {
+		t.Fatalf("add: %+v", r)
+	}
+	r = runCLI(t, "", "ls")
+	if r.code != 0 {
+		t.Fatalf("ls: %+v", r)
+	}
+	if !strings.Contains(r.stdout, "proj evil name\n  hello\n") {
+		t.Fatalf("ls:\n%s", r.stdout)
 	}
 }
 

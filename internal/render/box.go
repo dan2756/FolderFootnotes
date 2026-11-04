@@ -98,12 +98,7 @@ func Plain(sections []Section) string {
 
 // cleanLabel makes a label safe to print on one line.
 func cleanLabel(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r == '\n' || r == '\t' {
-			return ' '
-		}
-		return r
-	}, Sanitize(s))
+	return SingleLine(Sanitize(s))
 }
 
 // truncateLeft shortens s to at most n columns by cutting from the left,

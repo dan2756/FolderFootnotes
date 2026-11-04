@@ -151,7 +151,7 @@ func (c *cli) run(args []string) int {
 // message returns err's text safe to print: the paths in it can contain
 // directory names from a cloned repository, which must not be able to send
 // escape sequences to the terminal.
-func message(err error) string { return render.Sanitize(err.Error()) }
+func message(err error) string { return render.SingleLine(render.Sanitize(err.Error())) }
 
 func lookup(name string) (command, bool) {
 	for _, cmd := range commands {
@@ -249,7 +249,7 @@ func takesValue(fs *flag.FlagSet, name string) bool {
 // tildify shortens paths under the home directory to ~/... for display,
 // with escape sequences and control characters stripped (see message).
 func tildify(path string) string {
-	path = render.Sanitize(path)
+	path = render.SingleLine(render.Sanitize(path))
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return path

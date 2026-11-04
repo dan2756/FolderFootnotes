@@ -176,7 +176,8 @@ as untrusted:
 
 - escape sequences, control characters and bidi overrides are stripped
   before anything is printed, from the note and from directory names in
-  messages alike;
+  messages alike. A newline or tab in a directory name is shown as a space,
+  so the name cannot forge a second line of output;
 - only regular files are read. Symlinks are refused (a `.dirnote` link in a
   cloned repository could point at any file); directories, FIFOs and devices
   are ignored. Files over 64 KiB are refused;
