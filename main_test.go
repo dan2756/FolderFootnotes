@@ -714,6 +714,25 @@ func TestMessagesStripEscapes(t *testing.T) {
 	check("hook", r)
 }
 
+func TestJSONDoesNotEscapeHTML(t *testing.T) {
+	dir := setup(t)
+	if r := runCLI(t, "", "add", "-d", dir, "a && b < c"); r.code != 0 {
+		t.Fatalf("add: %+v", r)
+	}
+	for _, args := range [][]string{
+		{"show", "--json", "-d", dir},
+		{"ls", "--json"},
+	} {
+		r := runCLI(t, "", args...)
+		if r.code != 0 || !strings.Contains(r.stdout, `"text": "a && b < c"`) {
+			t.Fatalf("%v: %+v", args, r)
+		}
+		if strings.Contains(r.stdout, `\u0026`) || strings.Contains(r.stdout, `\u003c`) {
+			t.Fatalf("%v escaped HTML: %s", args, r.stdout)
+		}
+	}
+}
+
 func TestShowJSONStripsLocalText(t *testing.T) {
 	dir := setup(t)
 	os.WriteFile(filepath.Join(dir, ".dirnote"), []byte("hello \x1b]0;PWNED\x07 ‮evil\n"), 0o644)
