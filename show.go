@@ -178,6 +178,9 @@ func printSections(w io.Writer, secs []render.Section, plain bool) {
 func writeJSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
+	// A note is not HTML. The default encoder would turn "&" and "<" into
+	// \u0026 and \u003c, which is noise for the scripts this output is for.
+	enc.SetEscapeHTML(false)
 	return enc.Encode(v)
 }
 
