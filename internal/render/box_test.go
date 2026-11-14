@@ -28,6 +28,8 @@ func TestWrap(t *testing.T) {
 			[]string{"10. start the", "    db", "    container"}},
 		{"tabs and CRLF", "a\tb\r\nc", 20, []string{"a    b", "c"}},
 		{"wide runes", "日本語のテキスト", 6, []string{"日本語", "のテキ", "スト"}},
+		{"zwj stays whole", "👩‍💻👩‍💻", 3, []string{"👩‍💻", "👩‍💻"}},
+		{"emoji counts as two", "go 👩‍💻 now", 6, []string{"go 👩‍💻", "now"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -113,6 +115,17 @@ func TestBoxLongLabel(t *testing.T) {
 	}
 }
 
+func TestBoxEmojiAligns(t *testing.T) {
+	got := Box([]Section{{Label: "~/x", Text: "ship 👩‍💻 it"}}, Options{Width: 80})
+	want := "" +
+		"╭─ ~/x ──────╮\n" +
+		"│ ship 👩‍💻 it │\n" +
+		"╰────────────╯\n"
+	if got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestBoxColor(t *testing.T) {
 	got := Box([]Section{{Label: "~/x", Text: "note"}}, Options{Width: 80, Color: true})
 	if !strings.Contains(got, "\x1b[2m~/x\x1b[22m") {
@@ -139,17 +152,22 @@ func TestPlain(t *testing.T) {
 
 func TestWidth(t *testing.T) {
 	for s, want := range map[string]int{
-		"abc": 3,
-		"日本":  4,
-		"é":  1, // combining accent
-		"👍":   2,
-		"│ ─": 3,
-		"✅":   2,
-		"⚡":   2,
-		"☕":   2,
-		"⭐":   2,
-		"🟢":   2,
-		"✓":   1,
+		"abc":     3,
+		"日本":      4,
+		"é":      1, // combining accent
+		"👍":       2,
+		"│ ─":     3,
+		"✅":       2,
+		"⚡":       2,
+		"☕":       2,
+		"⭐":       2,
+		"🟢":       2,
+		"✓":       1,
+		"👍🏻":      2, // base emoji plus a skin tone
+		"👩‍💻":     2, // ZWJ sequence, one cell pair
+		"👨‍👩‍👧‍👦": 2,
+		"🇺🇸":      2,
+		"❤️":      2, // emoji presentation via variation selector
 	} {
 		if got := Width(s); got != want {
 			t.Errorf("Width(%q) = %d, want %d", s, got, want)
