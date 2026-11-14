@@ -107,12 +107,17 @@ func truncateLeft(s string, n int) string {
 	if Width(s) <= n {
 		return s
 	}
-	rs := []rune(s)
+	gs := graphemes(s)
 	w := 1 // the ellipsis
-	i := len(rs)
-	for i > 0 && w+runeWidth(rs[i-1]) <= n {
+	i := len(gs)
+	for i > 0 && w+gs[i-1].width <= n {
 		i--
-		w += runeWidth(rs[i])
+		w += gs[i].width
 	}
-	return "…" + string(rs[i:])
+	var b strings.Builder
+	b.WriteString("…")
+	for _, g := range gs[i:] {
+		b.WriteString(g.text)
+	}
+	return b.String()
 }
